@@ -18,6 +18,7 @@
 
   const W = 640;
   const H = 360;
+  const WORLD_W = 1920;
   const RENDER_SCALE = 2;
   const GROUND_TILE_Y = 296;
   const GROUND_Y = 316;
@@ -25,8 +26,6 @@
   const MOUSE_JUMP_SPEED = 610;
   const MOUSE_GRAVITY = 1320;
   const MOUSE_DETECTION_RADIUS = 270;
-  const MOUSE_PATROL_MIN = 395;
-  const MOUSE_PATROL_MAX = 565;
 
   canvas.width = W * RENDER_SCALE;
   canvas.height = H * RENDER_SCALE;
@@ -57,6 +56,7 @@
   let mode = "loading";
   let lastTime = performance.now();
   let worldTime = 0;
+  let cameraX = 0;
   let hitStop = 0;
   let endTimer = 0;
   let audioContext = null;
@@ -94,8 +94,14 @@
 
   const images = {};
   const platforms = [
-    { x: 136, y: 230, drawY: 210, w: 192 },
-    { x: 414, y: 184, drawY: 164, w: 128 }
+    { x: 120, y: 240, drawY: 220, w: 192 },
+    { x: 380, y: 195, drawY: 175, w: 128 },
+    { x: 580, y: 248, drawY: 228, w: 192 },
+    { x: 850, y: 188, drawY: 168, w: 128 },
+    { x: 1040, y: 238, drawY: 218, w: 192 },
+    { x: 1300, y: 178, drawY: 158, w: 128 },
+    { x: 1490, y: 234, drawY: 214, w: 192 },
+    { x: 1735, y: 190, drawY: 170, w: 128 }
   ];
 
   const player = {
@@ -107,12 +113,26 @@
     attackHit: false, beamHit: false, beamCooldown: 0
   };
 
-  const mouse = {
-    x: 500, y: GROUND_Y, vx: 0, vy: 0,
-    facing: -1, grounded: true, state: "idle", stateTime: 0,
-    health: 4, maxHealth: 4,
-    attackHit: false, patrolDir: -1, alerted: false, jumpCooldown: 0
-  };
+  const mouseSpawns = [
+    { x: 470, patrolMin: 390, patrolMax: 555 },
+    { x: 735, patrolMin: 650, patrolMax: 825 },
+    { x: 1050, patrolMin: 950, patrolMax: 1170 },
+    { x: 1370, patrolMin: 1265, patrolMax: 1450 },
+    { x: 1710, patrolMin: 1590, patrolMax: 1840 }
+  ];
+
+  function createMouse(spawn, index) {
+    return {
+      x: spawn.x, y: GROUND_Y, vx: 0, vy: 0,
+      facing: -1, grounded: true, state: "idle", stateTime: index * 0.08,
+      health: 4, maxHealth: 4, attackHit: false,
+      patrolDir: index % 2 ? 1 : -1, alerted: false, jumpCooldown: 0,
+      patrolMin: spawn.patrolMin, patrolMax: spawn.patrolMax,
+      animOffset: index * 0.13
+    };
+  }
+
+  const mice = mouseSpawns.map(createMouse);
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
@@ -130,7 +150,7 @@
       );
       Object.assign(images, Object.fromEntries(entries));
       mode = "ready";
-      status.textContent = "Одна мышь. Одна арена. Ни шагу назад.";
+      status.textContent = "Пять культистов. Большая арена. Ни шагу назад.";
       startButton.textContent = "ВСТУПИТЬ В БОЙ";
       startButton.disabled = false;
       draw();
@@ -179,14 +199,11 @@
       coyote: 0.08, jumpBuffer: 0, attackHit: false,
       beamHit: false, beamCooldown: 0
     });
-    Object.assign(mouse, {
-      x: 500, y: GROUND_Y, vx: 0, vy: 0, facing: -1,
-      grounded: true, state: "idle", stateTime: 0, health: 4,
-      attackHit: false, patrolDir: -1, alerted: false, jumpCooldown: 0
-    });
+    mice.splice(0, mice.length, ...mouseSpawns.map(createMouse));
     particles.length = 0;
     hitStop = 0;
     endTimer = 0;
+    cameraX = 0;
     mode = "playing";
     overlay.hidden = true;
     setMusicLevel();
@@ -224,7 +241,7 @@
     mode = "cinematic";
     keys.clear();
     player.vx = 0;
-    mouse.vx = 0;
+    for (const mouse of mice) mouse.vx = 0;
     setMusicLevel();
     victoryCinematic.hidden = false;
     cinematicPlayButton.hidden = true;
@@ -331,7 +348,7 @@
     sound("beam");
   }
 
-  function damageMouse(amount) {
+  function damageMouse(mouse, amount) {
     if (["hurt", "dead"].includes(mouse.state)) return;
     mouse.alerted = true;
     mouse.health = Math.max(0, mouse.health - amount);
@@ -342,17 +359,17 @@
     if (mouse.health === 0) {
       setState(mouse, "dead");
       mouse.vx = player.facing * 70;
-      endTimer = 1.0;
+      if (mice.every(candidate => candidate.state === "dead")) endTimer = 1.0;
     } else {
       setState(mouse, "hurt");
     }
   }
 
-  function damagePlayer() {
+  function damagePlayer(attacker) {
     if (player.invuln > 0 || player.state === "dead") return;
     player.health = Math.max(0, player.health - 1);
     player.invuln = 0.85;
-    player.vx = mouse.facing * 155;
+    player.vx = attacker.facing * 155;
     player.vy = -185;
     player.grounded = false;
     burst(player.x, player.y - 44, "#ffdf75", 12);
@@ -414,18 +431,22 @@
     if (player.state === "attack") {
       if (!player.attackHit && player.stateTime >= 0.14) {
         player.attackHit = true;
-        const dx = mouse.x - player.x;
-        if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 78 && Math.abs(mouse.y - player.y) < 56) {
-          damageMouse(1);
+        for (const mouse of mice) {
+          const dx = mouse.x - player.x;
+          if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 78 && Math.abs(mouse.y - player.y) < 56) {
+            damageMouse(mouse, 1);
+          }
         }
       }
       if (player.stateTime >= 0.43) setState(player, player.grounded ? "idle" : "air");
     } else if (player.state === "ranged") {
       if (!player.beamHit && player.stateTime >= 0.17) {
         player.beamHit = true;
-        const dx = mouse.x - player.x;
-        if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 275 && Math.abs(mouse.y - player.y) < 68) {
-          damageMouse(1);
+        for (const mouse of mice) {
+          const dx = mouse.x - player.x;
+          if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 275 && Math.abs(mouse.y - player.y) < 68) {
+            damageMouse(mouse, 1);
+          }
         }
       }
       if (player.stateTime >= 0.5) setState(player, player.grounded ? "idle" : "air");
@@ -437,7 +458,7 @@
     if (!player.grounded) player.vy += 1320 * dt;
     player.x += player.vx * dt;
     player.y += player.vy * dt;
-    player.x = Math.max(28, Math.min(W - 28, player.x));
+    player.x = Math.max(28, Math.min(WORLD_W - 28, player.x));
 
     let landed = false;
     if (player.vy >= 0) {
@@ -470,29 +491,29 @@
     }
   }
 
-  function updateMouse(dt) {
+  function updateMouse(mouse, dt) {
     mouse.stateTime += dt;
     mouse.jumpCooldown = Math.max(0, mouse.jumpCooldown - dt);
 
     if (mouse.state === "dead") {
       mouse.vx *= Math.pow(0.02, dt);
-      moveMouse(dt);
+      moveMouse(mouse, dt);
       return;
     }
     if (mouse.state === "hurt") {
       mouse.vx *= Math.pow(0.01, dt);
       if (mouse.stateTime >= 0.34) setState(mouse, "idle");
-      moveMouse(dt);
+      moveMouse(mouse, dt);
       return;
     }
     if (mouse.state === "attack") {
       mouse.vx = 0;
       if (!mouse.attackHit && mouse.stateTime >= 0.27) {
         mouse.attackHit = true;
-        if (Math.abs(player.x - mouse.x) < 53 && Math.abs(player.y - mouse.y) < 55) damagePlayer();
+        if (Math.abs(player.x - mouse.x) < 53 && Math.abs(player.y - mouse.y) < 55) damagePlayer(mouse);
       }
       if (mouse.stateTime >= 0.68) setState(mouse, "idle");
-      moveMouse(dt);
+      moveMouse(mouse, dt);
       return;
     }
 
@@ -504,7 +525,7 @@
     }
 
     if (player.state !== "dead" && distance < 48 && Math.abs(player.y - mouse.y) < 58) {
-      faceMouseToward(dx);
+      faceMouseToward(mouse, dx);
       mouse.attackHit = false;
       setState(mouse, "attack");
     } else if (player.state !== "dead" && mouse.alerted) {
@@ -526,7 +547,7 @@
       }
       const pursuitDx = pursuitX - mouse.x;
 
-      faceMouseToward(pursuitDx);
+      faceMouseToward(mouse, pursuitDx);
       mouse.vx = Math.abs(pursuitDx) > 5 ? Math.sign(pursuitDx) * 66 : 0;
 
       const targetIsAbove = player.y < mouse.y - 30;
@@ -544,16 +565,16 @@
       }
       setState(mouse, "run");
     } else {
-      if (mouse.x < MOUSE_PATROL_MIN) mouse.patrolDir = 1;
-      if (mouse.x > MOUSE_PATROL_MAX) mouse.patrolDir = -1;
+      if (mouse.x < mouse.patrolMin) mouse.patrolDir = 1;
+      if (mouse.x > mouse.patrolMax) mouse.patrolDir = -1;
       mouse.facing = mouse.patrolDir;
       mouse.vx = mouse.patrolDir * 31;
       setState(mouse, "run");
     }
-    moveMouse(dt);
+    moveMouse(mouse, dt);
   }
 
-  function faceMouseToward(dx) {
+  function faceMouseToward(mouse, dx) {
     if (Math.abs(dx) > 5) mouse.facing = Math.sign(dx);
   }
 
@@ -566,12 +587,12 @@
     ));
   }
 
-  function moveMouse(dt) {
+  function moveMouse(mouse, dt) {
     const previousY = mouse.y;
     if (!mouse.grounded) mouse.vy += MOUSE_GRAVITY * dt;
     mouse.x += mouse.vx * dt;
     mouse.y += mouse.vy * dt;
-    mouse.x = Math.max(28, Math.min(W - 28, mouse.x));
+    mouse.x = Math.max(28, Math.min(WORLD_W - 28, mouse.x));
 
     let landed = false;
     if (mouse.vy >= 0) {
@@ -620,13 +641,16 @@
     }
 
     updatePlayer(dt);
-    updateMouse(dt);
+    for (const mouse of mice) updateMouse(mouse, dt);
     updateParticles(dt);
+
+    const cameraTarget = Math.max(0, Math.min(WORLD_W - W, player.x - W * 0.42));
+    cameraX += (cameraTarget - cameraX) * Math.min(1, dt * 7);
 
     if (endTimer > 0) {
       endTimer -= dt;
       if (endTimer <= 0) {
-        if (mouse.state === "dead") {
+        if (mice.every(mouse => mouse.state === "dead")) {
           sound("victory");
           beginVictoryCinematic();
         } else if (player.state === "dead") {
@@ -657,16 +681,18 @@
   }
 
   function drawArena() {
-    ctx.drawImage(images.background, 0, 0, W, H);
-    for (let x = 0; x < W; x += 64) {
-      const index = x === 0 ? 0 : x >= W - 64 ? 2 : 1;
+    for (let x = 0; x < WORLD_W; x += W) {
+      ctx.drawImage(images.background, x, 0, W, H);
+    }
+    for (let x = 0; x < WORLD_W; x += 64) {
+      const index = x === 0 ? 0 : x >= WORLD_W - 64 ? 2 : 1;
       drawTile(index, x, GROUND_TILE_Y);
     }
-    drawPlatform(platforms[0], 3);
-    drawPlatform(platforms[1], 2);
+    for (const platform of platforms) drawPlatform(platform);
   }
 
-  function drawPlatform(platform, tileCount) {
+  function drawPlatform(platform) {
+    const tileCount = Math.ceil(platform.w / 64);
     for (let i = 0; i < tileCount; i += 1) {
       const index = i === 0 ? 4 : i === tileCount - 1 ? 6 : 5;
       drawTile(index, platform.x + i * 64, platform.drawY);
@@ -708,7 +734,7 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawMouse() {
+  function drawMouse(mouse) {
     const flip = mouse.facing > 0;
     if (mouse.state === "dead") {
       const f = Math.min(7, Math.floor(mouse.stateTime / 0.105));
@@ -720,10 +746,10 @@
       const f = Math.min(5, Math.floor(mouse.stateTime / 0.11));
       drawFrame(images.mouseAttack, f, 96, 64, mouse.x - 48, mouse.y - 64, flip);
     } else if (mouse.state === "run") {
-      const f = Math.floor(worldTime * 10) % 8;
+      const f = Math.floor((worldTime + mouse.animOffset) * 10) % 8;
       drawFrame(images.mouseRun, f, 80, 64, mouse.x - 40, mouse.y - 64, flip);
     } else {
-      const f = Math.floor(worldTime * 5) % 4;
+      const f = Math.floor((worldTime + mouse.animOffset) * 5) % 4;
       drawFrame(images.mouseIdle, f, 64, 64, mouse.x - 32, mouse.y - 64, flip);
     }
   }
@@ -756,18 +782,22 @@
     ctx.fillStyle = player.beamCooldown <= 0 ? "#ffd95e" : "#5e4824";
     ctx.fillRect(67, 47, Math.round(125 * (1 - player.beamCooldown / 1.05)), 5);
 
-    if (mouse.state !== "dead") {
+    const livingMice = mice.filter(mouse => mouse.state !== "dead");
+    if (livingMice.length) {
+      const nearestMouse = livingMice.reduce((nearest, mouse) => (
+        Math.abs(mouse.x - player.x) < Math.abs(nearest.x - player.x) ? mouse : nearest
+      ));
       ctx.fillStyle = "#080606d9";
       ctx.fillRect(440, 10, 192, 34);
       ctx.strokeStyle = "#70251f";
       ctx.strokeRect(440.5, 10.5, 191, 33);
       ctx.fillStyle = "#cf9b70";
       ctx.textAlign = "right";
-      ctx.fillText("МЫШЬ-КУЛЬТИСТ", 624, 21);
+      ctx.fillText(`КУЛЬТИСТЫ: ${livingMice.length}/${mice.length}`, 624, 21);
       ctx.fillStyle = "#291416";
       ctx.fillRect(452, 27, 172, 8);
       ctx.fillStyle = "#9d2631";
-      ctx.fillRect(452, 27, Math.round(172 * mouse.health / mouse.maxHealth), 8);
+      ctx.fillRect(452, 27, Math.round(172 * nearestMouse.health / nearestMouse.maxHealth), 8);
       ctx.textAlign = "left";
     }
   }
@@ -779,10 +809,13 @@
       ctx.fillRect(0, 0, W, H);
       return;
     }
+    ctx.save();
+    ctx.translate(-Math.round(cameraX), 0);
     drawArena();
-    drawMouse();
+    for (const mouse of mice) drawMouse(mouse);
     drawPlayer();
     drawParticles();
+    ctx.restore();
     drawHud();
   }
 
