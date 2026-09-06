@@ -11,6 +11,10 @@
   const gameFrame = document.querySelector("#game-frame");
   const fullscreenButton = document.querySelector("#fullscreen-button");
   const musicButton = document.querySelector("#music-button");
+  const victoryCinematic = document.querySelector("#victory-cinematic");
+  const victoryVideo = document.querySelector("#victory-video");
+  const cinematicPlayButton = document.querySelector("#cinematic-play");
+  const cinematicSkipButton = document.querySelector("#cinematic-skip");
 
   const W = 640;
   const H = 360;
@@ -60,6 +64,7 @@
   let musicEnabled = true;
   let musicTimer = null;
   let nextMusicTime = 0;
+  let victoryVideoPromise = null;
 
   const assetPaths = {
     background: "assets/backgrounds/arena_far.png",
@@ -78,6 +83,11 @@
     mouseHurt: "assets/sprites/cultist_mouse_hurt.png",
     mouseDeath: "assets/sprites/cultist_mouse_death.png"
   };
+
+  const victoryVideoParts = Array.from(
+    { length: 11 },
+    (_, index) => `assets/video/victory-parts/victory.mp4.part-${String(index).padStart(2, "0")}`
+  );
 
   const images = {};
   const platforms = [
@@ -126,7 +136,27 @@
     }
   }
 
+  function prepareVictoryVideo() {
+    if (victoryVideoPromise) return victoryVideoPromise;
+    victoryVideoPromise = Promise.all(victoryVideoParts.map(async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
+      return response.arrayBuffer();
+    })).then(parts => {
+      victoryVideo.src = URL.createObjectURL(new Blob(parts, { type: "video/mp4" }));
+      victoryVideo.load();
+    }).catch(error => {
+      victoryVideoPromise = null;
+      throw error;
+    });
+    return victoryVideoPromise;
+  }
+
   function resetGame() {
+    victoryVideo.pause();
+    victoryVideo.currentTime = 0;
+    victoryCinematic.hidden = true;
+    cinematicPlayButton.hidden = true;
     Object.assign(player, {
       x: 112, y: GROUND_Y, vx: 0, vy: 0, facing: 1, grounded: true,
       state: "idle", stateTime: 0, health: 5, invuln: 0,
@@ -143,6 +173,8 @@
     endTimer = 0;
     mode = "playing";
     overlay.hidden = true;
+    setMusicLevel();
+    prepareVictoryVideo().catch(() => {});
   }
 
   function showEnd(victory) {
@@ -154,6 +186,41 @@
       : "Даже бессмертной воле иногда требуется ещё одна попытка.";
     startButton.textContent = "СРАЗИТЬСЯ СНОВА";
     startButton.disabled = false;
+  }
+
+  function setMusicLevel() {
+    if (!musicGain || !audioContext) return;
+    musicGain.gain.cancelScheduledValues(audioContext.currentTime);
+    const volume = mode === "cinematic" ? 0 : (musicEnabled ? 0.055 : 0);
+    musicGain.gain.setTargetAtTime(volume, audioContext.currentTime, 0.025);
+  }
+
+  async function beginVictoryCinematic() {
+    if (mode === "cinematic") return;
+    mode = "cinematic";
+    keys.clear();
+    player.vx = 0;
+    mouse.vx = 0;
+    setMusicLevel();
+    victoryCinematic.hidden = false;
+    cinematicPlayButton.hidden = true;
+    try {
+      await prepareVictoryVideo();
+      if (mode !== "cinematic") return;
+      victoryVideo.currentTime = 0;
+      victoryVideo.volume = 0.9;
+      await victoryVideo.play();
+    } catch (_error) {
+      if (mode === "cinematic") cinematicPlayButton.hidden = false;
+    }
+  }
+
+  function finishVictoryCinematic() {
+    if (mode !== "cinematic") return;
+    victoryVideo.pause();
+    victoryCinematic.hidden = true;
+    cinematicPlayButton.hidden = true;
+    showEnd(true);
   }
 
   function ensureAudio() {
@@ -225,10 +292,7 @@
   function toggleMusic() {
     ensureAudio();
     musicEnabled = !musicEnabled;
-    if (musicGain && audioContext) {
-      musicGain.gain.cancelScheduledValues(audioContext.currentTime);
-      musicGain.gain.setTargetAtTime(musicEnabled ? 0.055 : 0, audioContext.currentTime, 0.025);
-    }
+    setMusicLevel();
     musicButton.textContent = musicEnabled ? "♫" : "♪";
     musicButton.setAttribute("aria-pressed", String(musicEnabled));
     musicButton.setAttribute("aria-label", musicEnabled ? "Выключить музыку" : "Включить музыку");
@@ -596,7 +660,7 @@
       if (endTimer <= 0) {
         if (mouse.state === "dead") {
           sound("victory");
-          showEnd(true);
+          beginVictoryCinematic();
         } else if (player.state === "dead") {
           showEnd(false);
         }
@@ -768,6 +832,7 @@
     if (!event.repeat) pressed.add(event.code);
     keys.add(event.code);
     ensureAudio();
+    if (!event.repeat && event.code === "Escape" && mode === "cinematic") finishVictoryCinematic();
     if (!event.repeat && event.code === "KeyF") toggleFullscreen();
     if (!event.repeat && event.code === "KeyM") toggleMusic();
   });
@@ -782,6 +847,17 @@
 
   fullscreenButton.addEventListener("click", toggleFullscreen);
   musicButton.addEventListener("click", toggleMusic);
+  cinematicSkipButton.addEventListener("click", finishVictoryCinematic);
+  cinematicPlayButton.addEventListener("click", () => {
+    ensureAudio();
+    victoryVideo.play().then(() => {
+      cinematicPlayButton.hidden = true;
+    }).catch(() => {
+      cinematicPlayButton.hidden = false;
+    });
+  });
+  victoryVideo.addEventListener("ended", finishVictoryCinematic);
+  victoryVideo.addEventListener("error", finishVictoryCinematic);
   musicButton.setAttribute("aria-pressed", "true");
 
   document.addEventListener("fullscreenchange", () => {

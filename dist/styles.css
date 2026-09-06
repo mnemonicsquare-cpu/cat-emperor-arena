@@ -75,6 +75,60 @@ canvas {
 
 .overlay[hidden] { display: none; }
 
+.cinematic {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+  animation: cinematic-in 420ms ease-out both;
+}
+
+.cinematic[hidden] { display: none; }
+
+.cinematic video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.cinematic-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.cinematic-play:active {
+  transform: translate(-50%, calc(-50% + 2px));
+}
+
+.cinematic-skip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  border-color: #8f7445;
+  padding: 9px 12px;
+  color: #d9cba9;
+  background: #090807c9;
+  font-size: 0.72rem;
+  opacity: 0.78;
+  box-shadow: inset 0 0 0 1px #2c1b11;
+}
+
+.cinematic-skip:hover,
+.cinematic-skip:focus-visible { opacity: 1; }
+
+@keyframes cinematic-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: #c98c34;
@@ -175,4 +229,5 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .game-frame { box-shadow: 0 0 0 6px #15100c; }
+  .cinematic { animation: none; }
 }
