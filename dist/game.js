@@ -90,7 +90,8 @@
     mouseAttack: "assets/sprites/cultist_mouse_attack.png",
     mouseHurt: "assets/sprites/cultist_mouse_hurt.png",
     mouseDeath: "assets/sprites/cultist_mouse_death.png",
-    sorcerer: "assets/sprites/sorcerer_mouse.png"
+    sorcerer: "assets/sprites/sorcerer_mouse.png",
+    zombie: "assets/sprites/zombie_mouse.png"
   };
 
   const backgroundMusicParts = Array.from(
@@ -133,14 +134,16 @@
     { x: 735, patrolMin: 650, patrolMax: 825 },
     { x: 1050, patrolMin: 950, patrolMax: 1170 },
     { x: 1370, patrolMin: 1265, patrolMax: 1450 },
-    { x: 1710, patrolMin: 1590, patrolMax: 1840 }
+    { x: 1710, patrolMin: 1590, patrolMax: 1840 },
+    { x: 1510, patrolMin: 1420, patrolMax: 1630, type: "zombie" }
   ];
 
   function createMouse(spawn, index) {
     return {
+      type: spawn.type || "cultist", damage: spawn.type === "zombie" ? 2 : 1, regenTime: 0,
       x: spawn.x, y: GROUND_Y, vx: 0, vy: 0,
       facing: -1, grounded: true, state: "idle", stateTime: index * 0.08,
-      health: 4, maxHealth: 4, attackHit: false,
+      health: spawn.type === "zombie" ? 8 : 4, maxHealth: spawn.type === "zombie" ? 8 : 4, attackHit: false,
       patrolDir: index % 2 ? 1 : -1, alerted: false, jumpCooldown: 0,
       patrolMin: spawn.patrolMin, patrolMax: spawn.patrolMax,
       animOffset: index * 0.13
@@ -190,7 +193,7 @@
       );
       Object.assign(images, Object.fromEntries(entries));
       mode = "ready";
-      status.textContent = "Пять культистов и два колдуна. Путь ведёт наверх.";
+      status.textContent = "Пять культистов, два колдуна и одна мышь-зомби.";
       startButton.textContent = "ВСТУПИТЬ В БОЙ";
       startButton.disabled = false;
       draw();
@@ -457,7 +460,7 @@
 
   function damagePlayer(attacker) {
     if (player.invuln > 0 || player.state === "dead") return;
-    player.health = Math.max(0, player.health - 1);
+    player.health = Math.max(0, player.health - (attacker.damage || 1));
     player.invuln = 0.85;
     player.vx = attacker.facing * 155;
     player.vy = -185;
@@ -582,6 +585,15 @@
   }
 
   function updateMouse(mouse, dt) {
+    const zombie = mouse.type === "zombie";
+    if (zombie && mouse.state !== "dead" && mouse.health < mouse.maxHealth) {
+      mouse.regenTime += dt;
+      if (mouse.regenTime >= 20) {
+        mouse.health = Math.min(mouse.maxHealth, mouse.health + 1);
+        mouse.regenTime = 0;
+        burst(mouse.x, mouse.y - 40, "#789c45", 5);
+      }
+    }
     mouse.stateTime += dt;
     mouse.jumpCooldown = Math.max(0, mouse.jumpCooldown - dt);
 
@@ -598,11 +610,11 @@
     }
     if (mouse.state === "attack") {
       mouse.vx = 0;
-      if (!mouse.attackHit && mouse.stateTime >= 0.27) {
+      if (!mouse.attackHit && mouse.stateTime >= (zombie ? 0.95 : 0.27)) {
         mouse.attackHit = true;
-        if (Math.abs(player.x - mouse.x) < 53 && Math.abs(player.y - mouse.y) < 55) damagePlayer(mouse);
+        if (Math.abs(player.x - mouse.x) < (zombie ? 70 : 53) && Math.abs(player.y - mouse.y) < 55 && (player.x - mouse.x) * mouse.facing >= -8) damagePlayer(mouse);
       }
-      if (mouse.stateTime >= 0.68) setState(mouse, "idle");
+      if (mouse.stateTime >= (zombie ? 1.65 : 0.68)) setState(mouse, "idle");
       moveMouse(mouse, dt);
       return;
     }
@@ -614,7 +626,7 @@
       mouse.alerted = true;
     }
 
-    if (player.state !== "dead" && distance < 48 && Math.abs(player.y - mouse.y) < 58) {
+    if (player.state !== "dead" && distance < (zombie ? 65 : 48) && Math.abs(player.y - mouse.y) < 58) {
       faceMouseToward(mouse, dx);
       mouse.attackHit = false;
       setState(mouse, "attack");
@@ -657,7 +669,7 @@
       const pursuitDx = pursuitX - mouse.x;
 
       faceMouseToward(mouse, pursuitDx);
-      mouse.vx = Math.abs(pursuitDx) > 5 ? Math.sign(pursuitDx) * 66 : 0;
+      mouse.vx = Math.abs(pursuitDx) > 5 ? Math.sign(pursuitDx) * (zombie && mouse.grounded ? 32 : 66) : 0;
 
       const targetIsAbove = navigationPlatform && navigationPlatform.y < mouse.y - 30;
       const nearTargetPlatform = navigationPlatform
@@ -677,7 +689,7 @@
       if (mouse.x < mouse.patrolMin) mouse.patrolDir = 1;
       if (mouse.x > mouse.patrolMax) mouse.patrolDir = -1;
       mouse.facing = mouse.patrolDir;
-      mouse.vx = mouse.patrolDir * 31;
+      mouse.vx = mouse.patrolDir * (zombie ? 16 : 31);
       setState(mouse, "run");
     }
     moveMouse(mouse, dt);
@@ -939,6 +951,19 @@
   }
 
   function drawMouse(mouse) {
+    if (mouse.type === "zombie") {
+      let row = 0, frame = Math.floor(worldTime * 3) % 4;
+      if (mouse.state === "run") row = 1;
+      if (mouse.state === "attack") {
+        row = 2;
+        frame = mouse.stateTime < 0.4 ? 0 : mouse.stateTime < 0.8 ? 1 : mouse.stateTime < 0.95 ? 2 : 3;
+      }
+      if (mouse.state === "hurt") { row = 3; frame = 0; }
+      if (mouse.state === "dead") { row = 3; frame = Math.min(3, Math.floor(mouse.stateTime / 0.22)); }
+      const fw = images.zombie.width / 4, fh = images.zombie.height / 4;
+      drawFrame(images.zombie, frame, fw, fh, mouse.x - 56, mouse.y - 100, mouse.facing < 0, row, 112, 104);
+      return;
+    }
     const flip = mouse.facing > 0;
     if (mouse.state === "dead") {
       const f = Math.min(7, Math.floor(mouse.stateTime / 0.105));
@@ -1004,6 +1029,26 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawEnemyPointer() {
+    if (mode !== "playing") return;
+    const enemies = allEnemies().filter(enemy => enemy.state !== "dead");
+    if (!enemies.length) return;
+    const nearest = enemies.reduce((a, b) =>
+      Math.hypot(a.x - player.x, a.y - player.y) < Math.hypot(b.x - player.x, b.y - player.y) ? a : b);
+    const sx = nearest.x - cameraX, sy = nearest.y - 40 - cameraY;
+    if (sx >= 0 && sx <= W && sy >= 0 && sy <= H) return;
+    const dx = sx - W / 2, dy = sy - H / 2;
+    const scale = Math.min((W / 2 - 24) / Math.abs(dx || 0.001), (H / 2 - 72) / Math.abs(dy || 0.001));
+    ctx.save();
+    ctx.translate(W / 2 + dx * scale, H / 2 + dy * scale);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.beginPath();
+    ctx.moveTo(12, 0); ctx.lineTo(-7, -8); ctx.lineTo(-3, 0); ctx.lineTo(-7, 8); ctx.closePath();
+    ctx.fillStyle = "#ffda65"; ctx.strokeStyle = "#241008"; ctx.lineWidth = 2;
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawHud() {
     ctx.fillStyle = "#080606d9";
     ctx.fillRect(8, 8, 198, 54);
@@ -1060,6 +1105,7 @@
     drawParticles();
     ctx.restore();
     drawHud();
+    drawEnemyPointer();
   }
 
   function loop(now) {
