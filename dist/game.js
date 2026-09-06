@@ -75,7 +75,7 @@
   backgroundMusic.volume = 0.32;
 
   const assetPaths = {
-    background: "assets/backgrounds/arena_far.png",
+    background: "assets/backgrounds/palace_interior.webp",
     tiles: "assets/tiles/arena_tileset.png",
     portrait: "assets/ui/cat_emperor_portrait.png",
     catIdle: "assets/sprites/cat_emperor_idle.png",
@@ -129,19 +129,30 @@
     attackHit: false, beamHit: false, beamCooldown: 0
   };
 
-  const mouseSpawns = [
+  const groundMouseSpawns = [
     { x: 470, patrolMin: 390, patrolMax: 555 },
-    { x: 735, patrolMin: 650, patrolMax: 825 },
-    { x: 1050, patrolMin: 950, patrolMax: 1170 },
     { x: 1370, patrolMin: 1265, patrolMax: 1450 },
-    { x: 1710, patrolMin: 1590, patrolMax: 1840 },
     { x: 1510, patrolMin: 1420, patrolMax: 1630, type: "zombie" }
   ];
+
+  function createMouseSpawns() {
+    // Keep five cultists, with a patrol on each tier. Every platform can be
+    // selected; choose again on restart without changing the arena's geometry.
+    const tiers = [platforms.slice(0, 8), platforms.slice(8, 12), platforms.slice(12)];
+    return [...groundMouseSpawns, ...tiers.map(tier => {
+      const platform = tier[Math.floor(Math.random() * tier.length)];
+      return {
+        x: platform.x + 32, y: platform.y,
+        patrolMin: platform.x + 28,
+        patrolMax: platform.x + platform.w - 28
+      };
+    })];
+  }
 
   function createMouse(spawn, index) {
     return {
       type: spawn.type || "cultist", damage: spawn.type === "zombie" ? 2 : 1, regenTime: 0,
-      x: spawn.x, y: GROUND_Y, vx: 0, vy: 0,
+      x: spawn.x, y: spawn.y ?? GROUND_Y, vx: 0, vy: 0,
       facing: -1, grounded: true, state: "idle", stateTime: index * 0.08,
       health: spawn.type === "zombie" ? 8 : 4, maxHealth: spawn.type === "zombie" ? 8 : 4, attackHit: false,
       patrolDir: index % 2 ? 1 : -1, alerted: false, jumpCooldown: 0,
@@ -150,7 +161,7 @@
     };
   }
 
-  const mice = mouseSpawns.map(createMouse);
+  const mice = createMouseSpawns().map(createMouse);
   const sorcererSpawns = [
     { x: 1130, y: 838 },
     { x: 615, y: 310 }
@@ -242,7 +253,7 @@
       coyote: 0.08, jumpBuffer: 0, attackHit: false,
       beamHit: false, beamCooldown: 0
     });
-    mice.splice(0, mice.length, ...mouseSpawns.map(createMouse));
+    mice.splice(0, mice.length, ...createMouseSpawns().map(createMouse));
     sorcerers.splice(0, sorcerers.length, ...sorcererSpawns.map(createSorcerer));
     particles.length = 0;
     projectiles.length = 0;
@@ -895,11 +906,8 @@
   }
 
   function drawArena() {
-    for (let y = 0; y < WORLD_H; y += H) {
-      for (let x = 0; x < WORLD_W; x += W) {
-        ctx.drawImage(images.background, x, y, W, H);
-      }
-    }
+    // One continuous palace, from floor to vaults, rather than stacked rooms.
+    ctx.drawImage(images.background, 0, 0, WORLD_W, WORLD_H);
     for (let x = 0; x < WORLD_W; x += 64) {
       const index = x === 0 ? 0 : x >= WORLD_W - 64 ? 2 : 1;
       drawTile(index, x, GROUND_TILE_Y);
@@ -960,8 +968,7 @@
       }
       if (mouse.state === "hurt") { row = 3; frame = 0; }
       if (mouse.state === "dead") { row = 3; frame = Math.min(3, Math.floor(mouse.stateTime / 0.22)); }
-      const fw = images.zombie.width / 4, fh = images.zombie.height / 4;
-      drawFrame(images.zombie, frame, fw, fh, mouse.x - 56, mouse.y - 100, mouse.facing < 0, row, 112, 104);
+      drawZombieFrame(mouse, row, frame);
       return;
     }
     const flip = mouse.facing > 0;
@@ -981,6 +988,31 @@
       const f = Math.floor((worldTime + mouse.animOffset) * 5) % 4;
       drawFrame(images.mouseIdle, f, 64, 64, mouse.x - 32, mouse.y - 64, flip);
     }
+  }
+
+  // The source sheet has uneven row spacing: a regular 4x4 cut includes
+  // transparent padding below the walking feet (and part of the next sword).
+  // Source baselines anchor visible feet to the same y used by collision physics.
+  const zombieRows = [
+    { y: 0, h: 310, feet: [296, 295, 295, 296], edges: [0, 310, 610, 914, 1246] },
+    { y: 310, h: 300, feet: [279, 279, 279, 279], edges: [0, 310, 634, 928, 1246] },
+    { y: 610, h: 340, feet: [328, 328, 329, 330] },
+    { y: 950, h: 312, feet: [272, 270, 284, 286] }
+  ];
+
+  function drawZombieFrame(mouse, row, frame) {
+    const source = zombieRows[row];
+    const fw = images.zombie.width / 4;
+    const sx = source.edges ? source.edges[frame] : frame * fw;
+    const sw = source.edges ? source.edges[frame + 1] - sx : fw;
+    const scaleY = 104 / (images.zombie.height / 4);
+    ctx.save();
+    ctx.translate(Math.round(mouse.x), Math.round(mouse.y));
+    if (mouse.facing < 0) ctx.scale(-1, 1);
+    ctx.drawImage(images.zombie, sx, source.y, sw, source.h,
+      -56 + (sx - frame * fw) * 112 / fw, -source.feet[frame] * scaleY,
+      sw * 112 / fw, source.h * scaleY);
+    ctx.restore();
   }
 
   function drawSorcerer(sorcerer) {
