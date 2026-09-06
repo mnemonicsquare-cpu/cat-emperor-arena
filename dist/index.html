@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080707">
+  <meta name="description" content="Промежуточная версия пиксельного платформера о Коте-Императоре.">
+  <title>Кот-Император: Испытательная арена</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="game-shell" aria-label="Кот-Император: испытательная арена">
+    <div id="game-frame" class="game-frame">
+      <canvas id="game" width="1280" height="720" aria-label="Игровая арена в высоком разрешении"></canvas>
+      <div class="corner-controls" aria-label="Настройки игры">
+        <button id="music-button" class="tool-button" type="button" aria-label="Выключить музыку" title="Музыка: M">♫</button>
+        <button id="fullscreen-button" class="tool-button" type="button" aria-label="Перейти в полноэкранный режим" title="Полный экран: F">⛶</button>
+      </div>
+      <section id="loading" class="overlay" aria-live="polite">
+        <p class="eyebrow">ИСПЫТАТЕЛЬНАЯ АРЕНА</p>
+        <h1>КОТ-ИМПЕРАТОР</h1>
+        <p id="load-status">Подготовка священного вооружения…</p>
+        <button id="start" type="button" disabled>ВСТУПИТЬ В БОЙ</button>
+      </section>
+    </div>
+
+    <div class="controls" aria-label="Управление">
+      <span><kbd>A</kbd><kbd>D</kbd> движение</span>
+      <span><kbd>W</kbd>/<kbd>Space</kbd> прыжок</span>
+      <span><kbd>J</kbd> меч</span>
+      <span><kbd>K</kbd> луч</span>
+      <span><kbd>M</kbd> музыка</span>
+      <span><kbd>F</kbd> полный экран</span>
+      <span><kbd>R</kbd> заново</span>
+    </div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
