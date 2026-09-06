@@ -19,13 +19,17 @@
   const W = 640;
   const H = 360;
   const WORLD_W = 1920;
+  const WORLD_H = 960;
   const RENDER_SCALE = 2;
-  const GROUND_TILE_Y = 296;
-  const GROUND_Y = 316;
+  const GROUND_TILE_Y = 896;
+  const GROUND_Y = 916;
   const PLAYER_JUMP_SPEED = 510;
   const MOUSE_JUMP_SPEED = 610;
   const MOUSE_GRAVITY = 1320;
   const MOUSE_DETECTION_RADIUS = 270;
+  const SORCERER_LEVEL_TOLERANCE = 44;
+  const SORCERER_TELEPORT_RADIUS = 720;
+  const PROJECTILE_SPEED = 105;
 
   canvas.width = W * RENDER_SCALE;
   canvas.height = H * RENDER_SCALE;
@@ -57,6 +61,7 @@
   let lastTime = performance.now();
   let worldTime = 0;
   let cameraX = 0;
+  let cameraY = WORLD_H - H;
   let hitStop = 0;
   let endTimer = 0;
   let audioContext = null;
@@ -84,7 +89,8 @@
     mouseRun: "assets/sprites/cultist_mouse_run.png",
     mouseAttack: "assets/sprites/cultist_mouse_attack.png",
     mouseHurt: "assets/sprites/cultist_mouse_hurt.png",
-    mouseDeath: "assets/sprites/cultist_mouse_death.png"
+    mouseDeath: "assets/sprites/cultist_mouse_death.png",
+    sorcerer: "assets/sprites/sorcerer_mouse.png"
   };
 
   const backgroundMusicParts = Array.from(
@@ -94,15 +100,24 @@
 
   const images = {};
   const platforms = [
-    { x: 120, y: 240, drawY: 220, w: 192 },
-    { x: 380, y: 195, drawY: 175, w: 128 },
-    { x: 580, y: 248, drawY: 228, w: 192 },
-    { x: 850, y: 188, drawY: 168, w: 128 },
-    { x: 1040, y: 238, drawY: 218, w: 192 },
-    { x: 1300, y: 178, drawY: 158, w: 128 },
-    { x: 1490, y: 234, drawY: 214, w: 192 },
-    { x: 1735, y: 190, drawY: 170, w: 128 }
+    { x: 120, y: 840, drawY: 820, w: 192 },
+    { x: 380, y: 795, drawY: 775, w: 128 },
+    { x: 580, y: 848, drawY: 828, w: 192 },
+    { x: 850, y: 788, drawY: 768, w: 128 },
+    { x: 1040, y: 838, drawY: 818, w: 192 },
+    { x: 1300, y: 778, drawY: 758, w: 128 },
+    { x: 1490, y: 834, drawY: 814, w: 192 },
+    { x: 1735, y: 790, drawY: 770, w: 128 },
+    { x: 1620, y: 710, drawY: 690, w: 192 },
+    { x: 1400, y: 630, drawY: 610, w: 192 },
+    { x: 1180, y: 550, drawY: 530, w: 192 },
+    { x: 960, y: 470, drawY: 450, w: 192 },
+    { x: 740, y: 390, drawY: 370, w: 192 },
+    { x: 520, y: 310, drawY: 290, w: 192 },
+    { x: 300, y: 230, drawY: 210, w: 192 },
+    { x: 80, y: 150, drawY: 130, w: 192 }
   ];
+  const climbPlatforms = platforms.slice(7);
 
   const player = {
     x: 112, y: GROUND_Y, vx: 0, vy: 0,
@@ -133,6 +148,31 @@
   }
 
   const mice = mouseSpawns.map(createMouse);
+  const sorcererSpawns = [
+    { x: 1130, y: 838 },
+    { x: 615, y: 310 }
+  ];
+
+  function createSorcerer(spawn, index) {
+    return {
+      type: "sorcerer", x: spawn.x, y: spawn.y,
+      facing: -1, state: "idle", stateTime: index * 0.1,
+      health: 3, maxHealth: 3, castCooldown: 0.8 + index * 0.45,
+      shotFired: false, teleported: false, teleportTarget: null,
+      animOffset: index * 0.17
+    };
+  }
+
+  const sorcerers = sorcererSpawns.map(createSorcerer);
+  const projectiles = [];
+
+  function allEnemies() {
+    return [...mice, ...sorcerers];
+  }
+
+  function allEnemiesDefeated() {
+    return allEnemies().every(enemy => enemy.state === "dead");
+  }
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
@@ -150,7 +190,7 @@
       );
       Object.assign(images, Object.fromEntries(entries));
       mode = "ready";
-      status.textContent = "Пять культистов. Большая арена. Ни шагу назад.";
+      status.textContent = "Пять культистов и два колдуна. Путь ведёт наверх.";
       startButton.textContent = "ВСТУПИТЬ В БОЙ";
       startButton.disabled = false;
       draw();
@@ -200,10 +240,13 @@
       beamHit: false, beamCooldown: 0
     });
     mice.splice(0, mice.length, ...mouseSpawns.map(createMouse));
+    sorcerers.splice(0, sorcerers.length, ...sorcererSpawns.map(createSorcerer));
     particles.length = 0;
+    projectiles.length = 0;
     hitStop = 0;
     endTimer = 0;
     cameraX = 0;
+    cameraY = WORLD_H - H;
     mode = "playing";
     overlay.hidden = true;
     setMusicLevel();
@@ -242,6 +285,7 @@
     keys.clear();
     player.vx = 0;
     for (const mouse of mice) mouse.vx = 0;
+    projectiles.length = 0;
     setMusicLevel();
     victoryCinematic.hidden = false;
     cinematicPlayButton.hidden = true;
@@ -359,10 +403,56 @@
     if (mouse.health === 0) {
       setState(mouse, "dead");
       mouse.vx = player.facing * 70;
-      if (mice.every(candidate => candidate.state === "dead")) endTimer = 1.0;
+      if (allEnemiesDefeated()) endTimer = 1.0;
     } else {
       setState(mouse, "hurt");
     }
+  }
+
+  function chooseTeleportTarget(sorcerer) {
+    const surfaces = [];
+    for (let x = 80; x < WORLD_W - 80; x += 160) surfaces.push({ x, y: GROUND_Y });
+    for (const platform of platforms) {
+      surfaces.push(
+        { x: platform.x + 34, y: platform.y },
+        { x: platform.x + platform.w / 2, y: platform.y },
+        { x: platform.x + platform.w - 34, y: platform.y }
+      );
+    }
+    const candidates = surfaces.filter(point => {
+      const withinRange = Math.hypot(point.x - sorcerer.x, point.y - sorcerer.y) <= SORCERER_TELEPORT_RADIUS;
+      const farFromPlayer = Math.hypot(point.x - player.x, point.y - player.y) >= 260;
+      const unoccupied = allEnemies().every(enemy => (
+        enemy === sorcerer || enemy.state === "dead" || Math.hypot(point.x - enemy.x, point.y - enemy.y) >= 72
+      ));
+      return withinRange && farFromPlayer && unoccupied;
+    });
+    if (!candidates.length) return { x: sorcerer.x, y: sorcerer.y };
+    candidates.sort((a, b) => (
+      Math.hypot(b.x - player.x, b.y - player.y) - Math.hypot(a.x - player.x, a.y - player.y)
+    ));
+    return candidates[Math.floor(Math.random() * Math.min(3, candidates.length))];
+  }
+
+  function damageSorcerer(sorcerer, amount) {
+    if (["teleport", "dead"].includes(sorcerer.state)) return;
+    sorcerer.health = Math.max(0, sorcerer.health - amount);
+    burst(sorcerer.x, sorcerer.y - 38, "#42d9ff", 14);
+    hitStop = 0.055;
+    sound("hit");
+    if (sorcerer.health === 0) {
+      setState(sorcerer, "dead");
+      if (allEnemiesDefeated()) endTimer = 1.0;
+      return;
+    }
+    sorcerer.teleportTarget = chooseTeleportTarget(sorcerer);
+    sorcerer.teleported = false;
+    setState(sorcerer, "teleport");
+  }
+
+  function damageEnemy(enemy, amount) {
+    if (enemy.type === "sorcerer") damageSorcerer(enemy, amount);
+    else damageMouse(enemy, amount);
   }
 
   function damagePlayer(attacker) {
@@ -431,10 +521,10 @@
     if (player.state === "attack") {
       if (!player.attackHit && player.stateTime >= 0.14) {
         player.attackHit = true;
-        for (const mouse of mice) {
-          const dx = mouse.x - player.x;
-          if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 78 && Math.abs(mouse.y - player.y) < 56) {
-            damageMouse(mouse, 1);
+        for (const enemy of allEnemies()) {
+          const dx = enemy.x - player.x;
+          if (enemy.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 78 && Math.abs(enemy.y - player.y) < 62) {
+            damageEnemy(enemy, 1);
           }
         }
       }
@@ -442,10 +532,10 @@
     } else if (player.state === "ranged") {
       if (!player.beamHit && player.stateTime >= 0.17) {
         player.beamHit = true;
-        for (const mouse of mice) {
-          const dx = mouse.x - player.x;
-          if (mouse.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 275 && Math.abs(mouse.y - player.y) < 68) {
-            damageMouse(mouse, 1);
+        for (const enemy of allEnemies()) {
+          const dx = enemy.x - player.x;
+          if (enemy.state !== "dead" && Math.sign(dx || player.facing) === player.facing && Math.abs(dx) < 275 && Math.abs(enemy.y - player.y) < 68) {
+            damageEnemy(enemy, 1);
           }
         }
       }
@@ -531,9 +621,28 @@
     } else if (player.state !== "dead" && mouse.alerted) {
       const targetPlatform = platformSupporting(player);
       const currentPlatform = platformSupporting(mouse);
-      let pursuitX = targetPlatform
-        ? Math.max(targetPlatform.x + 18, Math.min(targetPlatform.x + targetPlatform.w - 18, player.x))
+      const targetClimbIndex = climbPlatforms.indexOf(targetPlatform);
+      const currentClimbIndex = climbPlatforms.indexOf(currentPlatform);
+      let navigationPlatform = targetPlatform;
+
+      if (targetClimbIndex >= 0 && targetPlatform.y < mouse.y - 115) {
+        if (!currentPlatform) navigationPlatform = climbPlatforms[0];
+        else if (currentClimbIndex >= 0 && currentClimbIndex < targetClimbIndex) {
+          navigationPlatform = climbPlatforms[currentClimbIndex + 1];
+        } else if (currentClimbIndex < 0) {
+          navigationPlatform = null;
+        }
+      }
+
+      let pursuitX = navigationPlatform
+        ? Math.max(navigationPlatform.x + 18, Math.min(navigationPlatform.x + navigationPlatform.w - 18, player.x))
         : player.x;
+
+      if (!navigationPlatform && currentPlatform && targetClimbIndex >= 0) {
+        pursuitX = climbPlatforms[0].x > mouse.x
+          ? currentPlatform.x + currentPlatform.w + 18
+          : currentPlatform.x - 18;
+      }
 
       if (
         currentPlatform
@@ -550,10 +659,10 @@
       faceMouseToward(mouse, pursuitDx);
       mouse.vx = Math.abs(pursuitDx) > 5 ? Math.sign(pursuitDx) * 66 : 0;
 
-      const targetIsAbove = player.y < mouse.y - 30;
-      const nearTargetPlatform = targetPlatform
-        && mouse.x >= targetPlatform.x - 60
-        && mouse.x <= targetPlatform.x + targetPlatform.w + 60;
+      const targetIsAbove = navigationPlatform && navigationPlatform.y < mouse.y - 30;
+      const nearTargetPlatform = navigationPlatform
+        && mouse.x >= navigationPlatform.x - 60
+        && mouse.x <= navigationPlatform.x + navigationPlatform.w + 60;
       const nearAirborneTarget = !targetPlatform && Math.abs(dx) < 115;
 
       if (mouse.grounded && mouse.jumpCooldown <= 0 && targetIsAbove && (nearTargetPlatform || nearAirborneTarget)) {
@@ -618,6 +727,95 @@
     }
   }
 
+  function fireSorcererProjectile(sorcerer) {
+    projectiles.push({
+      x: sorcerer.x + sorcerer.facing * 34,
+      y: sorcerer.y - 42,
+      vx: sorcerer.facing * PROJECTILE_SPEED,
+      facing: sorcerer.facing,
+      life: 12,
+      phase: Math.random() * Math.PI * 2
+    });
+    sound("beam");
+  }
+
+  function updateSorcerer(sorcerer, dt) {
+    sorcerer.stateTime += dt;
+    sorcerer.castCooldown = Math.max(0, sorcerer.castCooldown - dt);
+    if (sorcerer.state === "dead") return;
+
+    if (sorcerer.state === "teleport") {
+      if (!sorcerer.teleported && sorcerer.stateTime >= 0.18) {
+        burst(sorcerer.x, sorcerer.y - 36, "#6550ff", 18);
+        sorcerer.x = sorcerer.teleportTarget.x;
+        sorcerer.y = sorcerer.teleportTarget.y;
+        sorcerer.teleported = true;
+        burst(sorcerer.x, sorcerer.y - 36, "#42d9ff", 18);
+      }
+      if (sorcerer.stateTime >= 0.52) {
+        sorcerer.castCooldown = 0.9;
+        setState(sorcerer, "idle");
+      }
+      return;
+    }
+
+    if (sorcerer.state === "cast") {
+      if (!sorcerer.shotFired && sorcerer.stateTime >= 0.42) {
+        sorcerer.shotFired = true;
+        fireSorcererProjectile(sorcerer);
+      }
+      if (sorcerer.stateTime >= 0.86) {
+        sorcerer.castCooldown = 1.65;
+        setState(sorcerer, "idle");
+      }
+      return;
+    }
+
+    const dx = player.x - sorcerer.x;
+    const onSameLevel = Math.abs(player.y - sorcerer.y) <= SORCERER_LEVEL_TOLERANCE;
+    if (player.state !== "dead" && onSameLevel) {
+      if (Math.abs(dx) > 4) sorcerer.facing = Math.sign(dx);
+      if (sorcerer.castCooldown <= 0) {
+        sorcerer.shotFired = false;
+        setState(sorcerer, "cast");
+      }
+    }
+  }
+
+  function projectileHitsTerrain(projectile) {
+    if (projectile.x < 0 || projectile.x > WORLD_W || projectile.y >= GROUND_TILE_Y) return true;
+    return platforms.some(platform => (
+      projectile.x >= platform.x
+      && projectile.x <= platform.x + platform.w
+      && projectile.y >= platform.drawY
+      && projectile.y <= platform.drawY + 58
+    ));
+  }
+
+  function updateProjectiles(dt) {
+    for (let index = projectiles.length - 1; index >= 0; index -= 1) {
+      const projectile = projectiles[index];
+      projectile.life -= dt;
+      projectile.x += projectile.vx * dt;
+      projectile.phase += dt * 9;
+
+      if (projectileHitsTerrain(projectile) || projectile.life <= 0) {
+        burst(projectile.x, projectile.y, "#278cff", 6);
+        projectiles.splice(index, 1);
+        continue;
+      }
+
+      const hitsPlayer = Math.abs(projectile.x - player.x) < 20
+        && projectile.y > player.y - 78
+        && projectile.y < player.y - 8;
+      if (hitsPlayer) {
+        damagePlayer(projectile);
+        burst(projectile.x, projectile.y, "#4adfff", 10);
+        projectiles.splice(index, 1);
+      }
+    }
+  }
+
   function updateParticles(dt) {
     for (let i = particles.length - 1; i >= 0; i -= 1) {
       const particle = particles[i];
@@ -642,15 +840,19 @@
 
     updatePlayer(dt);
     for (const mouse of mice) updateMouse(mouse, dt);
+    for (const sorcerer of sorcerers) updateSorcerer(sorcerer, dt);
+    updateProjectiles(dt);
     updateParticles(dt);
 
-    const cameraTarget = Math.max(0, Math.min(WORLD_W - W, player.x - W * 0.42));
-    cameraX += (cameraTarget - cameraX) * Math.min(1, dt * 7);
+    const cameraTargetX = Math.max(0, Math.min(WORLD_W - W, player.x - W * 0.42));
+    const cameraTargetY = Math.max(0, Math.min(WORLD_H - H, player.y - H * 0.58));
+    cameraX += (cameraTargetX - cameraX) * Math.min(1, dt * 7);
+    cameraY += (cameraTargetY - cameraY) * Math.min(1, dt * 7);
 
     if (endTimer > 0) {
       endTimer -= dt;
       if (endTimer <= 0) {
-        if (mice.every(mouse => mouse.state === "dead")) {
+        if (allEnemiesDefeated()) {
           sound("victory");
           beginVictoryCinematic();
         } else if (player.state === "dead") {
@@ -681,8 +883,10 @@
   }
 
   function drawArena() {
-    for (let x = 0; x < WORLD_W; x += W) {
-      ctx.drawImage(images.background, x, 0, W, H);
+    for (let y = 0; y < WORLD_H; y += H) {
+      for (let x = 0; x < WORLD_W; x += W) {
+        ctx.drawImage(images.background, x, y, W, H);
+      }
     }
     for (let x = 0; x < WORLD_W; x += 64) {
       const index = x === 0 ? 0 : x >= WORLD_W - 64 ? 2 : 1;
@@ -754,6 +958,43 @@
     }
   }
 
+  function drawSorcerer(sorcerer) {
+    const flip = sorcerer.facing < 0;
+    let row = 0;
+    let frame = Math.floor((worldTime + sorcerer.animOffset) * 4) % 4;
+
+    if (sorcerer.state === "cast") {
+      row = 1;
+      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.19));
+    } else if (sorcerer.state === "teleport") {
+      row = sorcerer.stateTime < 0.12 ? 2 : 3;
+      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.13));
+    } else if (sorcerer.state === "dead") {
+      row = 3;
+      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.12));
+      ctx.globalAlpha = Math.max(0, 1 - sorcerer.stateTime * 1.5);
+    }
+
+    drawFrame(images.sorcerer, frame, 128, 128, sorcerer.x - 48, sorcerer.y - 96, flip, row, 96, 96);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawProjectiles() {
+    for (const projectile of projectiles) {
+      const pulse = Math.sin(projectile.phase) > 0 ? 1 : 0;
+      const trailDirection = projectile.facing > 0 ? -1 : 1;
+      ctx.fillStyle = "#1748d5";
+      ctx.fillRect(Math.round(projectile.x - 6), Math.round(projectile.y - 5), 12, 10);
+      ctx.fillStyle = "#31bfff";
+      ctx.fillRect(Math.round(projectile.x - 4), Math.round(projectile.y - 3), 8, 6);
+      ctx.fillStyle = "#d4fbff";
+      ctx.fillRect(Math.round(projectile.x - 1), Math.round(projectile.y - 2), 3, 3);
+      ctx.fillStyle = pulse ? "#6a55ff" : "#248cff";
+      ctx.fillRect(Math.round(projectile.x + trailDirection * 10), Math.round(projectile.y - 2), 4, 4);
+      ctx.fillRect(Math.round(projectile.x + trailDirection * 16), Math.round(projectile.y), 3, 3);
+    }
+  }
+
   function drawParticles() {
     for (const particle of particles) {
       ctx.globalAlpha = Math.min(1, particle.life * 4);
@@ -782,10 +1023,10 @@
     ctx.fillStyle = player.beamCooldown <= 0 ? "#ffd95e" : "#5e4824";
     ctx.fillRect(67, 47, Math.round(125 * (1 - player.beamCooldown / 1.05)), 5);
 
-    const livingMice = mice.filter(mouse => mouse.state !== "dead");
-    if (livingMice.length) {
-      const nearestMouse = livingMice.reduce((nearest, mouse) => (
-        Math.abs(mouse.x - player.x) < Math.abs(nearest.x - player.x) ? mouse : nearest
+    const livingEnemies = allEnemies().filter(enemy => enemy.state !== "dead");
+    if (livingEnemies.length) {
+      const nearestEnemy = livingEnemies.reduce((nearest, enemy) => (
+        Math.hypot(enemy.x - player.x, enemy.y - player.y) < Math.hypot(nearest.x - player.x, nearest.y - player.y) ? enemy : nearest
       ));
       ctx.fillStyle = "#080606d9";
       ctx.fillRect(440, 10, 192, 34);
@@ -793,11 +1034,11 @@
       ctx.strokeRect(440.5, 10.5, 191, 33);
       ctx.fillStyle = "#cf9b70";
       ctx.textAlign = "right";
-      ctx.fillText(`КУЛЬТИСТЫ: ${livingMice.length}/${mice.length}`, 624, 21);
+      ctx.fillText(`ВРАГИ: ${livingEnemies.length}/${allEnemies().length}`, 624, 21);
       ctx.fillStyle = "#291416";
       ctx.fillRect(452, 27, 172, 8);
-      ctx.fillStyle = "#9d2631";
-      ctx.fillRect(452, 27, Math.round(172 * nearestMouse.health / nearestMouse.maxHealth), 8);
+      ctx.fillStyle = nearestEnemy.type === "sorcerer" ? "#286bd7" : "#9d2631";
+      ctx.fillRect(452, 27, Math.round(172 * nearestEnemy.health / nearestEnemy.maxHealth), 8);
       ctx.textAlign = "left";
     }
   }
@@ -810,9 +1051,11 @@
       return;
     }
     ctx.save();
-    ctx.translate(-Math.round(cameraX), 0);
+    ctx.translate(-Math.round(cameraX), -Math.round(cameraY));
     drawArena();
     for (const mouse of mice) drawMouse(mouse);
+    for (const sorcerer of sorcerers) drawSorcerer(sorcerer);
+    drawProjectiles();
     drawPlayer();
     drawParticles();
     ctx.restore();
