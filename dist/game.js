@@ -60,11 +60,14 @@
   let hitStop = 0;
   let endTimer = 0;
   let audioContext = null;
-  let musicGain = null;
   let musicEnabled = true;
-  let musicTimer = null;
-  let nextMusicTime = 0;
+  let backgroundMusicPromise = null;
   let victoryVideoPromise = null;
+
+  const backgroundMusic = new Audio();
+  backgroundMusic.loop = true;
+  backgroundMusic.preload = "auto";
+  backgroundMusic.volume = 0.32;
 
   const assetPaths = {
     background: "assets/backgrounds/arena_far.png",
@@ -84,9 +87,9 @@
     mouseDeath: "assets/sprites/cultist_mouse_death.png"
   };
 
-  const victoryVideoParts = Array.from(
-    { length: 11 },
-    (_, index) => `assets/video/victory-parts/victory.mp4.part-${String(index).padStart(2, "0")}`
+  const backgroundMusicParts = Array.from(
+    { length: 7 },
+    (_, index) => `assets/audio/litany-parts/litany.mp3.part-${String(index).padStart(2, "0")}`
   );
 
   const images = {};
@@ -138,18 +141,31 @@
 
   function prepareVictoryVideo() {
     if (victoryVideoPromise) return victoryVideoPromise;
-    victoryVideoPromise = Promise.all(victoryVideoParts.map(async path => {
-      const response = await fetch(path);
-      if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
-      return response.arrayBuffer();
-    })).then(parts => {
-      victoryVideo.src = URL.createObjectURL(new Blob(parts, { type: "video/mp4" }));
+    victoryVideoPromise = fetch("assets/video/victory.mp4").then(async response => {
+      if (!response.ok) throw new Error("Не удалось загрузить победный ролик");
+      victoryVideo.src = URL.createObjectURL(new Blob([await response.arrayBuffer()], { type: "video/mp4" }));
       victoryVideo.load();
     }).catch(error => {
       victoryVideoPromise = null;
       throw error;
     });
     return victoryVideoPromise;
+  }
+
+  function prepareBackgroundMusic() {
+    if (backgroundMusicPromise) return backgroundMusicPromise;
+    backgroundMusicPromise = Promise.all(backgroundMusicParts.map(async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
+      return response.arrayBuffer();
+    })).then(parts => {
+      backgroundMusic.src = URL.createObjectURL(new Blob(parts, { type: "audio/mpeg" }));
+      backgroundMusic.load();
+    }).catch(error => {
+      backgroundMusicPromise = null;
+      throw error;
+    });
+    return backgroundMusicPromise;
   }
 
   function resetGame() {
@@ -189,10 +205,18 @@
   }
 
   function setMusicLevel() {
-    if (!musicGain || !audioContext) return;
-    musicGain.gain.cancelScheduledValues(audioContext.currentTime);
-    const volume = mode === "cinematic" ? 0 : (musicEnabled ? 0.055 : 0);
-    musicGain.gain.setTargetAtTime(volume, audioContext.currentTime, 0.025);
+    if (!musicEnabled || mode !== "playing") {
+      backgroundMusic.pause();
+      return;
+    }
+    prepareBackgroundMusic().then(() => {
+      if (musicEnabled && mode === "playing") {
+        backgroundMusic.volume = 0.32;
+        backgroundMusic.play().catch(() => {});
+      }
+    }).catch(() => {
+      if (mode === "playing") status.textContent = "Не удалось загрузить фоновую музыку.";
+    });
   }
 
   async function beginVictoryCinematic() {
@@ -228,65 +252,9 @@
       const AudioCtor = window.AudioContext || window.webkitAudioContext;
       if (AudioCtor) {
         audioContext = new AudioCtor();
-        musicGain = audioContext.createGain();
-        musicGain.gain.value = musicEnabled ? 0.055 : 0;
-        musicGain.connect(audioContext.destination);
       }
     }
     if (audioContext?.state === "suspended") audioContext.resume();
-    startMusic();
-  }
-
-  function midiToFrequency(note) {
-    return 440 * 2 ** ((note - 69) / 12);
-  }
-
-  function musicTone(note, start, duration, type, volume) {
-    if (!audioContext || !musicGain) return;
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(midiToFrequency(note), start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-    oscillator.connect(gain).connect(musicGain);
-    oscillator.start(start);
-    oscillator.stop(start + duration + 0.02);
-  }
-
-  function scheduleMusicBar(start) {
-    // Original eight-bit gothic march in D minor; generated locally by Web Audio.
-    const melody = [62, 62, 65, 69, 68, 65, 62, 60, 62, 65, 67, 68, 69, 68, 65, 61];
-    const bass = [38, 38, 36, 36, 41, 41, 37, 37];
-    const step = 0.24;
-    melody.forEach((note, index) => {
-      musicTone(note, start + index * step, step * 0.76, "square", index % 4 === 0 ? 0.22 : 0.15);
-    });
-    bass.forEach((note, index) => {
-      musicTone(note, start + index * step * 2, step * 1.55, "sawtooth", 0.11);
-    });
-    [0, 4, 8, 12].forEach(index => {
-      musicTone(50, start + index * step, step * 0.42, "triangle", 0.12);
-    });
-    return melody.length * step;
-  }
-
-  function pumpMusic() {
-    if (!audioContext) return;
-    if (nextMusicTime < audioContext.currentTime - 0.5) {
-      nextMusicTime = audioContext.currentTime + 0.08;
-    }
-    while (nextMusicTime < audioContext.currentTime + 1.2) {
-      nextMusicTime += scheduleMusicBar(nextMusicTime);
-    }
-  }
-
-  function startMusic() {
-    if (!audioContext || musicTimer) return;
-    nextMusicTime = audioContext.currentTime + 0.08;
-    pumpMusic();
-    musicTimer = window.setInterval(pumpMusic, 500);
   }
 
   function toggleMusic() {
