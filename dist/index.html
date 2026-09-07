@@ -6,15 +6,20 @@
   <meta name="theme-color" content="#080707">
   <meta name="description" content="Промежуточная версия пиксельного платформера о Коте-Императоре.">
   <title>Кот-Император: Испытательная арена</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=upgrade-20260907">
 </head>
 <body>
   <main class="game-shell" aria-label="Кот-Император: испытательная арена">
+    <div class="corner-controls" aria-label="Настройки игры">
+      <button id="music-button" class="tool-button" type="button" aria-label="Выключить музыку" title="Музыка: M">♫</button>
+      <button id="fullscreen-button" class="tool-button" type="button" aria-label="Перейти в полноэкранный режим" title="Полный экран: F">⛶</button>
+      <button id="pause-button" class="tool-button" type="button" aria-label="Пауза" title="Пауза: P">Ⅱ</button>
+      <button id="touch-toggle" class="tool-button" type="button" aria-label="Сенсорное управление" aria-pressed="false" title="Сенсорное управление">✥</button>
+    </div>
     <div id="game-frame" class="game-frame">
       <canvas id="game" width="1280" height="720" aria-label="Игровая арена в высоком разрешении"></canvas>
-      <div class="corner-controls" aria-label="Настройки игры">
-        <button id="music-button" class="tool-button" type="button" aria-label="Выключить музыку" title="Музыка: M">♫</button>
-        <button id="fullscreen-button" class="tool-button" type="button" aria-label="Перейти в полноэкранный режим" title="Полный экран: F">⛶</button>
+      <div id="touch-hud" class="touch-hud" hidden aria-label="Состояние боя">
+        <span id="touch-health"></span><span id="touch-enemies"></span><span id="touch-beam"></span>
       </div>
       <section id="victory-cinematic" class="cinematic" hidden aria-label="Победный ролик">
         <video id="victory-video" preload="auto" playsinline></video>
@@ -29,6 +34,18 @@
       </section>
     </div>
 
+    <div id="touch-controls" class="touch-controls" aria-label="Сенсорное управление" hidden>
+      <div class="touch-movement">
+        <button type="button" class="touch-button" data-code="KeyA" aria-label="Двигаться влево">◀</button>
+        <button type="button" class="touch-button" data-code="KeyD" aria-label="Двигаться вправо">▶</button>
+      </div>
+      <div class="touch-actions">
+        <button type="button" class="touch-button" data-code="KeyJ" aria-label="Удар мечом">Меч</button>
+        <button type="button" class="touch-button" data-code="KeyK" aria-label="Выстрелить лучом">Луч</button>
+        <button type="button" class="touch-button jump-button" data-code="Space" aria-label="Прыгнуть">↑<small>Прыжок</small></button>
+      </div>
+    </div>
+    <p class="touch-hint">Поверните телефон горизонтально, чтобы увеличить поле.</p>
     <div class="controls" aria-label="Управление">
       <span><kbd>A</kbd><kbd>D</kbd> движение</span>
       <span><kbd>W</kbd>/<kbd>Space</kbd> прыжок</span>
@@ -37,8 +54,11 @@
       <span><kbd>M</kbd> музыка</span>
       <span><kbd>F</kbd> полный экран</span>
       <span><kbd>R</kbd> заново</span>
+      <span><kbd>P</kbd> пауза</span>
     </div>
   </main>
-  <script src="game.js?v=palace-patrols-20260906"></script>
+  <script src="input.js?v=upgrade-20260907"></script>
+  <script src="atlas.js?v=upgrade-20260907"></script>
+  <script src="game.js?v=upgrade-20260907"></script>
 </body>
 </html>

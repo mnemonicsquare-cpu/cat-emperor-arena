@@ -15,7 +15,9 @@ html, body {
 body {
   display: grid;
   place-items: center;
-  padding: 8px;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  min-height: 100vh;
+  min-height: var(--viewport-height, 100dvh);
   overflow-x: hidden;
   background:
     radial-gradient(circle at 50% 45%, #28100d 0, #0b0707 42%, #030303 76%),
@@ -23,10 +25,16 @@ body {
 }
 
 .game-shell {
-  width: min(98vw, 1600px, calc((100vh - 68px) * 16 / 9));
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .game-frame {
+  flex: none;
+  width: min(100%, calc(var(--arena-width, 640px) + 6px));
   position: relative;
   overflow: hidden;
   border: 3px solid #9e681e;
@@ -71,6 +79,7 @@ canvas {
   text-align: center;
   background: #050303c7;
   backdrop-filter: blur(2px);
+  z-index: 2;
 }
 
 .overlay[hidden] { display: none; }
@@ -168,13 +177,13 @@ button:not(:disabled):hover { filter: brightness(1.2); }
 button:not(:disabled):active { transform: translateY(2px); box-shadow: inset 0 0 0 2px #1c0b08, 0 2px 0 #170705; }
 
 .corner-controls {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  position: relative;
+  width: min(100%, calc(var(--arena-width, 640px) + 6px));
+  justify-content: flex-end;
   z-index: 2;
   display: flex;
   gap: 6px;
-  opacity: 0.72;
+  opacity: 1;
   transition: opacity 120ms ease;
 }
 
@@ -183,8 +192,8 @@ button:not(:disabled):active { transform: translateY(2px); box-shadow: inset 0 0
 
 .tool-button {
   display: grid;
-  width: 34px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border-color: #a87932;
   padding: 0;
@@ -203,7 +212,7 @@ button:not(:disabled):active { transform: translateY(2px); box-shadow: inset 0 0
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px 18px;
-  margin-top: 12px;
+  margin-top: 0;
   color: #b9aa91;
   font-size: 0.82rem;
 }
@@ -221,11 +230,86 @@ kbd {
 }
 
 @media (max-width: 640px) {
-  body { align-content: start; padding-top: max(8px, env(safe-area-inset-top)); }
   .controls { font-size: 0.72rem; gap: 7px 12px; }
-  .corner-controls { right: 6px; bottom: 6px; }
-  .tool-button { width: 32px; height: 28px; }
+  .overlay { padding: 10px; }
+  .overlay .eyebrow { display: none; }
+  .overlay h1 { font-size: clamp(1.4rem, 6vw, 2.3rem); }
+  #load-status { margin: 8px 0; font-size: 0.875rem; }
 }
+
+.touch-controls {
+  width: min(100%, 1000px);
+  min-height: 88px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.touch-controls[hidden] { display: none; }
+.touch-hud {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  right: 5px;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid #9f6b24;
+  background: #080606d9;
+  color: #ffe39a;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.touch-hud[hidden] { display: none; }
+.touch-movement, .touch-actions { display: flex; align-items: center; gap: 6px; }
+.touch-button {
+  width: clamp(52px, 9vw, 76px);
+  height: clamp(60px, 10vw, 76px);
+  border-radius: 12px;
+  padding: 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+  touch-action: none;
+  background: linear-gradient(#34241b, #160f0b);
+}
+.touch-button.is-held { background: #854522; border-color: #fff2b0; transform: translateY(2px); }
+.jump-button { background: linear-gradient(#7f271b, #3c100d); font-size: 1.6rem; }
+.jump-button small { display: block; margin-top: 4px; font-size: 0.75rem; }
+.touch-hint { display: none; margin: 0; color: #b9aa91; font-size: 0.875rem; text-align: center; }
+.touch-enabled .controls { display: none; }
+@media (orientation: portrait) and (max-width: 600px) {
+  .touch-enabled .touch-hint { display: block; }
+}
+@media (max-height: 500px) {
+  .game-shell { gap: 4px; }
+  .touch-controls { min-height: 68px; }
+  .touch-button { height: 60px; }
+  .overlay { padding: 8px; }
+  .overlay .eyebrow { display: none; }
+  .overlay h1 { font-size: 1.6rem; }
+  #load-status { margin: 6px 0; }
+}
+.game-shell:fullscreen, .game-shell.immersive {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: var(--viewport-height, 100dvh);
+  justify-content: center;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  background: #050404;
+  z-index: 10;
+  overflow: auto;
+}
+body.immersive-active { overflow: hidden; }
+button { touch-action: manipulation; }
+.touch-button { touch-action: none; }
+button:focus-visible { outline: 2px solid #fff0bd; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .game-frame { box-shadow: 0 0 0 6px #15100c; }

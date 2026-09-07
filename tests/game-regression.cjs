@@ -1,23 +1,5 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-
-// Run the real game logic without a browser or loading audio/video.
-const calls = [];
-const context = new Proxy({}, { get: (_, key) => (...args) => calls.push([key, ...args]) });
-const element = { style: {}, querySelector() { return this; }, getContext: () => context,
-  addEventListener() {}, setAttribute() {}, pause() {} };
-const sandbox = { document: { querySelector: () => element, addEventListener() {} },
-  window: { innerWidth: 1280, innerHeight: 800, addEventListener() {} },
-  Audio: function () { return element; }, performance: { now: () => 0 }, Math: Object.create(Math) };
-const source = fs.readFileSync(path.join(__dirname, '../dist/game.js'), 'utf8');
-vm.runInNewContext(source.replace('  loadAssets();\n  requestAnimationFrame(loop);', `
-  globalThis.game = { createMouseSpawns, createMouse, platforms, player, mice, sorcerers,
-    updateMouse, moveMouse, drawZombieFrame, zombieRows, images, drawArena, resetGame,
-    setMode: value => { mode = value; }, GROUND_Y };
-`), sandbox);
-const g = sandbox.game;
+const {g, calls, sandbox} = require('./harness.cjs')();
 
 // Exercise all platform choices, not just a lucky random layout.
 const covered = new Set();
@@ -72,7 +54,7 @@ assert.equal(zombie.health, 8);
 assert.equal(zombie.damage, 2);
 g.player.state = 'dead';
 zombie.health = 7;
-for (let i = 0; i < 590; i++) g.updateMouse(zombie, 1 / 30);
+for (let i = 0; i < g.ZOMBIE_REGEN_SECONDS * 30 - 10; i++) g.updateMouse(zombie, 1 / 30);
 assert.equal(zombie.health, 7);
 for (let i = 0; i < 20; i++) g.updateMouse(zombie, 1 / 30);
 assert.equal(zombie.health, 8);

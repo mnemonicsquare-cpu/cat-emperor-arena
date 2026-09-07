@@ -11,6 +11,17 @@
   const gameFrame = document.querySelector("#game-frame");
   const fullscreenButton = document.querySelector("#fullscreen-button");
   const musicButton = document.querySelector("#music-button");
+  const pauseButton = document.querySelector("#pause-button");
+  const touchToggle = document.querySelector("#touch-toggle");
+  const touchControls = document.querySelector("#touch-controls");
+  const touchHud = document.querySelector("#touch-hud");
+  const touchHealth = document.querySelector("#touch-health");
+  const touchEnemies = document.querySelector("#touch-enemies");
+  const touchBeam = document.querySelector("#touch-beam");
+  const touchButtons = [...document.querySelectorAll(".touch-button")];
+  const input = new window.ArenaInput();
+  let touchEnabled = (navigator.maxTouchPoints || 0) > 0 || window.matchMedia("(any-pointer: coarse)").matches;
+  let immersive = false;
   const victoryCinematic = document.querySelector("#victory-cinematic");
   const victoryVideo = document.querySelector("#victory-video");
   const cinematicPlayButton = document.querySelector("#cinematic-play");
@@ -30,6 +41,11 @@
   const SORCERER_LEVEL_TOLERANCE = 44;
   const SORCERER_TELEPORT_RADIUS = 720;
   const PROJECTILE_SPEED = 105;
+  const PROJECTILE_HALF_W = 3;
+  const PROJECTILE_HALF_H = 2;
+  const ZOMBIE_REGEN_SECONDS = 12;
+  const TELEPORT_VANISH_TIME = 0.55;
+  const TELEPORT_DURATION = 1.25;
 
   canvas.width = W * RENDER_SCALE;
   canvas.height = H * RENDER_SCALE;
@@ -37,25 +53,21 @@
   ctx.imageSmoothingEnabled = false;
 
   function resizeGameSurface() {
-    const fullscreen = Boolean(document.fullscreenElement);
-    const horizontalMargin = fullscreen ? 0 : 16;
-    const verticalMargin = fullscreen ? 0 : 68;
-    const availableW = Math.max(1, window.innerWidth - horizontalMargin);
-    const availableH = Math.max(1, window.innerHeight - verticalMargin);
-    const availableScale = Math.min(availableW / W, availableH / H);
-    const pixelScale = availableScale >= 2 ? Math.floor(availableScale) : availableScale;
-    const displayWidth = Math.floor(W * pixelScale);
-
-    if (fullscreen) {
-      gameShell.style.width = "";
-      canvas.style.width = `${displayWidth}px`;
-    } else {
-      gameShell.style.width = `${displayWidth}px`;
-      canvas.style.width = "100%";
-    }
+    const viewport = window.visualViewport;
+    const width = viewport?.width || window.innerWidth;
+    const height = viewport?.height || window.innerHeight;
+    document.documentElement.style.setProperty("--viewport-height", `${height}px`);
+    const style = getComputedStyle(document.fullscreenElement || immersive ? gameShell : document.body);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const gap = parseFloat(getComputedStyle(gameShell).gap) || 0;
+    const extras = [...gameShell.children].filter(child => child !== gameFrame && child.getBoundingClientRect().height > 0);
+    const chrome = extras.reduce((sum, child) => sum + child.getBoundingClientRect().height, 0) + gap * extras.length;
+    const displayWidth = window.fitArena(width, height, padX, padY, chrome, touchEnabled);
+    gameShell.style.setProperty("--arena-width", `${displayWidth}px`);
   }
-  const keys = new Set();
-  const pressed = new Set();
+  const keys = input.keys;
+  const pressed = input.pressed;
   const particles = [];
   let mode = "loading";
   let lastTime = performance.now();
@@ -78,19 +90,10 @@
     background: "assets/backgrounds/palace_interior.webp",
     tiles: "assets/tiles/arena_tileset.png",
     portrait: "assets/ui/cat_emperor_portrait.png",
-    catIdle: "assets/sprites/cat_emperor_idle.png",
-    catRun: "assets/sprites/cat_emperor_run.png",
-    catAir: "assets/sprites/cat_emperor_airborne.png",
-    catAttack: "assets/sprites/cat_emperor_attack.png",
-    catRanged: "assets/sprites/cat_emperor_ranged.png",
-    catDamage: "assets/sprites/cat_emperor_damage.png",
     catFx: "assets/sprites/cat_emperor_fx.png",
-    mouseIdle: "assets/sprites/cultist_mouse_idle.png",
-    mouseRun: "assets/sprites/cultist_mouse_run.png",
-    mouseAttack: "assets/sprites/cultist_mouse_attack.png",
-    mouseHurt: "assets/sprites/cultist_mouse_hurt.png",
-    mouseDeath: "assets/sprites/cultist_mouse_death.png",
-    sorcerer: "assets/sprites/sorcerer_mouse.png",
+    catDetailed: "assets/sprites/cat_emperor_detailed.webp",
+    mouseDetailed: "assets/sprites/cultist_mouse_detailed.webp",
+    sorcererDetailed: "assets/sprites/sorcerer_mouse_detailed.webp",
     zombie: "assets/sprites/zombie_mouse.png"
   };
 
@@ -151,7 +154,7 @@
 
   function createMouse(spawn, index) {
     return {
-      type: spawn.type || "cultist", damage: spawn.type === "zombie" ? 2 : 1, regenTime: 0,
+      type: spawn.type || "cultist", damage: spawn.type === "zombie" ? 2 : 1, regenTime: 0, regenPulse: 0,
       x: spawn.x, y: spawn.y ?? GROUND_Y, vx: 0, vy: 0,
       facing: -1, grounded: true, state: "idle", stateTime: index * 0.08,
       health: spawn.type === "zombie" ? 8 : 4, maxHealth: spawn.type === "zombie" ? 8 : 4, attackHit: false,
@@ -172,7 +175,7 @@
       type: "sorcerer", x: spawn.x, y: spawn.y,
       facing: -1, state: "idle", stateTime: index * 0.1,
       health: 3, maxHealth: 3, castCooldown: 0.8 + index * 0.45,
-      shotFired: false, teleported: false, teleportTarget: null,
+      shotFired: false, teleported: false, teleportTarget: null, teleportOrigin: null,
       animOffset: index * 0.17
     };
   }
@@ -243,6 +246,7 @@
   }
 
   function resetGame() {
+    clearInput();
     victoryVideo.pause();
     victoryVideo.currentTime = 0;
     victoryCinematic.hidden = true;
@@ -262,6 +266,8 @@
     cameraX = 0;
     cameraY = WORLD_H - H;
     mode = "playing";
+    pauseButton.disabled = false;
+    pauseButton.setAttribute("aria-label", "Пауза");
     overlay.hidden = true;
     setMusicLevel();
     prepareVictoryVideo().catch(() => {});
@@ -269,6 +275,8 @@
 
   function showEnd(victory) {
     mode = victory ? "victory" : "defeat";
+    clearInput();
+    pauseButton.disabled = true;
     overlay.hidden = false;
     title.textContent = victory ? "ВРАГ ПОВЕРЖЕН" : "СВЕТ УГАС";
     status.textContent = victory
@@ -296,7 +304,8 @@
   async function beginVictoryCinematic() {
     if (mode === "cinematic") return;
     mode = "cinematic";
-    keys.clear();
+    clearInput();
+    pauseButton.disabled = true;
     player.vx = 0;
     for (const mouse of mice) mouse.vx = 0;
     projectiles.length = 0;
@@ -342,12 +351,84 @@
   }
 
   async function toggleFullscreen() {
+    clearInput();
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await gameFrame.requestFullscreen();
+      else if (immersive) setImmersive(false);
+      else if (gameShell.requestFullscreen && document.fullscreenEnabled) await gameShell.requestFullscreen();
+      else setImmersive(true);
     } catch (_error) {
-      status.textContent = "Полноэкранный режим заблокирован браузером.";
+      // iPhone/browser fallback: expand within the page without promising to
+      // hide system browser chrome or requiring an unsupported orientation lock.
+      setImmersive(true);
     }
+    syncFullscreenButton();
+  }
+
+  function setImmersive(active) {
+    immersive = active;
+    gameShell.classList.toggle("immersive", active);
+    document.body.classList.toggle("immersive-active", active);
+    resizeGameSurface();
+  }
+
+  function syncFullscreenButton() {
+    const active = Boolean(document.fullscreenElement) || immersive;
+    fullscreenButton.textContent = active ? "×" : "⛶";
+    fullscreenButton.setAttribute("aria-label", active ? "Свернуть игру" : "Развернуть игру");
+    resizeGameSurface();
+  }
+
+  function syncTouchButtons() {
+    for (const button of touchButtons) button.classList.toggle("is-held", input.isDown(button.dataset.code));
+  }
+
+  function clearInput() {
+    input.clear();
+    syncTouchButtons();
+  }
+
+  function setTouchEnabled(active) {
+    clearInput();
+    touchEnabled = active;
+    touchControls.hidden = !active;
+    gameShell.classList.toggle("touch-enabled", active);
+    touchToggle.setAttribute("aria-pressed", String(active));
+    resizeGameSurface();
+  }
+
+  function pauseGame() {
+    clearInput();
+    if (mode === "cinematic") {
+      victoryVideo.pause();
+      cinematicPlayButton.hidden = false;
+      return;
+    }
+    if (mode !== "playing") return;
+    mode = "paused";
+    overlay.hidden = false;
+    title.textContent = "ПАУЗА";
+    status.textContent = "Бой продолжится с того же места.";
+    startButton.textContent = "ПРОДОЛЖИТЬ";
+    startButton.disabled = false;
+    pauseButton.setAttribute("aria-label", "Продолжить бой");
+    setMusicLevel();
+  }
+
+  function resumeGame() {
+    if (mode !== "paused") return;
+    clearInput();
+    mode = "playing";
+    overlay.hidden = true;
+    lastTime = performance.now();
+    pauseButton.setAttribute("aria-label", "Пауза");
+    setMusicLevel();
+  }
+
+  function togglePause() {
+    ensureAudio();
+    if (mode === "paused") resumeGame();
+    else pauseGame();
   }
 
   function sound(kind) {
@@ -382,7 +463,7 @@
   }
 
   function isDown(...codes) {
-    return codes.some(code => keys.has(code));
+    return codes.some(code => input.isDown(code));
   }
 
   function wasPressed(...codes) {
@@ -407,13 +488,17 @@
   }
 
   function damageMouse(mouse, amount) {
-    if (["hurt", "dead"].includes(mouse.state)) return;
+    const zombie = mouse.type === "zombie";
+    if (mouse.state === "dead" || (!zombie && mouse.state === "hurt")) return;
     mouse.alerted = true;
     mouse.health = Math.max(0, mouse.health - amount);
-    mouse.vx = player.facing * 145;
     burst(mouse.x, mouse.y - 35, "#ffb52e", 9);
-    hitStop = 0.055;
     sound("hit");
+    // Living zombies take damage without knockback, stagger, resetting the
+    // machete timer, or even a global hit-stop that could delay their swing.
+    if (zombie && mouse.health > 0) return;
+    mouse.vx = player.facing * 145;
+    hitStop = 0.055;
     if (mouse.health === 0) {
       setState(mouse, "dead");
       mouse.vx = player.facing * 70;
@@ -425,27 +510,39 @@
 
   function chooseTeleportTarget(sorcerer) {
     const surfaces = [];
-    for (let x = 80; x < WORLD_W - 80; x += 160) surfaces.push({ x, y: GROUND_Y });
+    const left = Math.max(48, cameraX + 56);
+    const right = Math.min(WORLD_W - 48, cameraX + W - 56);
+    for (let x = left; x <= right; x += 40) surfaces.push({ x, y: GROUND_Y });
     for (const platform of platforms) {
-      surfaces.push(
-        { x: platform.x + 34, y: platform.y },
-        { x: platform.x + platform.w / 2, y: platform.y },
-        { x: platform.x + platform.w - 34, y: platform.y }
-      );
+      for (let x = Math.max(left, platform.x + 28); x <= Math.min(right, platform.x + platform.w - 28); x += 32) {
+        surfaces.push({ x, y: platform.y });
+      }
     }
-    const candidates = surfaces.filter(point => {
-      const withinRange = Math.hypot(point.x - sorcerer.x, point.y - sorcerer.y) <= SORCERER_TELEPORT_RADIUS;
-      const farFromPlayer = Math.hypot(point.x - player.x, point.y - player.y) >= 260;
-      const unoccupied = allEnemies().every(enemy => (
-        enemy === sorcerer || enemy.state === "dead" || Math.hypot(point.x - enemy.x, point.y - enemy.y) >= 72
-      ));
-      return withinRange && farFromPlayer && unoccupied;
-    });
-    if (!candidates.length) return { x: sorcerer.x, y: sorcerer.y };
+    const candidates = surfaces.filter(point => validTeleportTarget(sorcerer, point));
+    if (!candidates.length) return null;
     candidates.sort((a, b) => (
       Math.hypot(b.x - player.x, b.y - player.y) - Math.hypot(a.x - player.x, a.y - player.y)
     ));
     return candidates[Math.floor(Math.random() * Math.min(3, candidates.length))];
+  }
+
+  function validTeleportTarget(sorcerer, point) {
+    if (!point) return false;
+    // Fit the entire character, not only its centre, into the live viewport.
+    const visible = point.x - 48 >= cameraX + 8 && point.x + 48 <= cameraX + W - 8
+      && point.y - 104 >= cameraY + 8 && point.y <= cameraY + H - 12;
+    const supported = point.y === GROUND_Y || platforms.some(platform => (
+      point.y === platform.y && point.x >= platform.x + 28 && point.x <= platform.x + platform.w - 28
+    ));
+    const clearHeadroom = !platforms.some(platform => (
+      platform.y !== point.y && point.x + 22 > platform.x && point.x - 22 < platform.x + platform.w
+      && platform.y + 10 > point.y - 82 && platform.y < point.y - 2
+    ));
+    const travel = Math.hypot(point.x - sorcerer.x, point.y - sorcerer.y);
+    const unoccupied = allEnemies().every(enemy => enemy === sorcerer || enemy.state === "dead"
+      || Math.hypot(point.x - enemy.x, point.y - enemy.y) >= 72);
+    return visible && supported && clearHeadroom && travel >= 96 && travel <= SORCERER_TELEPORT_RADIUS
+      && Math.hypot(point.x - player.x, point.y - player.y) >= 180 && unoccupied;
   }
 
   function damageSorcerer(sorcerer, amount) {
@@ -460,6 +557,8 @@
       return;
     }
     sorcerer.teleportTarget = chooseTeleportTarget(sorcerer);
+    if (!sorcerer.teleportTarget) return; // No escape: no teleport animation.
+    sorcerer.teleportOrigin = { x: sorcerer.x, y: sorcerer.y };
     sorcerer.teleported = false;
     setState(sorcerer, "teleport");
   }
@@ -597,12 +696,14 @@
 
   function updateMouse(mouse, dt) {
     const zombie = mouse.type === "zombie";
+    mouse.regenPulse = Math.max(0, mouse.regenPulse - dt);
     if (zombie && mouse.state !== "dead" && mouse.health < mouse.maxHealth) {
       mouse.regenTime += dt;
-      if (mouse.regenTime >= 20) {
+      if (mouse.regenTime >= ZOMBIE_REGEN_SECONDS) {
         mouse.health = Math.min(mouse.maxHealth, mouse.health + 1);
         mouse.regenTime = 0;
-        burst(mouse.x, mouse.y - 40, "#789c45", 5);
+        mouse.regenPulse = 1.4;
+        burst(mouse.x, mouse.y - 40, "#b4ee68", 16);
       }
     }
     mouse.stateTime += dt;
@@ -768,14 +869,19 @@
     if (sorcerer.state === "dead") return;
 
     if (sorcerer.state === "teleport") {
-      if (!sorcerer.teleported && sorcerer.stateTime >= 0.18) {
-        burst(sorcerer.x, sorcerer.y - 36, "#6550ff", 18);
-        sorcerer.x = sorcerer.teleportTarget.x;
-        sorcerer.y = sorcerer.teleportTarget.y;
+      if (!sorcerer.teleported && sorcerer.stateTime >= TELEPORT_VANISH_TIME) {
+        // The camera/player may have moved during the windup. Never use a
+        // stale target outside the current view or newly occupied surface.
+        if (!validTeleportTarget(sorcerer, sorcerer.teleportTarget)) {
+          sorcerer.teleportTarget = chooseTeleportTarget(sorcerer);
+        }
+        if (sorcerer.teleportTarget) {
+          sorcerer.x = sorcerer.teleportTarget.x;
+          sorcerer.y = sorcerer.teleportTarget.y;
+        }
         sorcerer.teleported = true;
-        burst(sorcerer.x, sorcerer.y - 36, "#42d9ff", 18);
       }
-      if (sorcerer.stateTime >= 0.52) {
+      if (sorcerer.stateTime >= TELEPORT_DURATION) {
         sorcerer.castCooldown = 0.9;
         setState(sorcerer, "idle");
       }
@@ -806,12 +912,15 @@
   }
 
   function projectileHitsTerrain(projectile) {
-    if (projectile.x < 0 || projectile.x > WORLD_W || projectile.y >= GROUND_TILE_Y) return true;
+    const left = Math.min(projectile.previousX ?? projectile.x, projectile.x) - PROJECTILE_HALF_W;
+    const right = Math.max(projectile.previousX ?? projectile.x, projectile.x) + PROJECTILE_HALF_W;
+    if (right < 0 || left > WORLD_W || projectile.y + PROJECTILE_HALF_H >= GROUND_Y) return true;
+    // Only the solid shelf blocks a shot. The old 58px box included transparent
+    // space below the platform. Decorative supports are not an invisible wall.
     return platforms.some(platform => (
-      projectile.x >= platform.x
-      && projectile.x <= platform.x + platform.w
-      && projectile.y >= platform.drawY
-      && projectile.y <= platform.drawY + 58
+      right >= platform.x && left <= platform.x + platform.w
+      && projectile.y + PROJECTILE_HALF_H >= platform.y - 1
+      && projectile.y - PROJECTILE_HALF_H <= platform.y + 10
     ));
   }
 
@@ -819,6 +928,7 @@
     for (let index = projectiles.length - 1; index >= 0; index -= 1) {
       const projectile = projectiles[index];
       projectile.life -= dt;
+      projectile.previousX = projectile.x;
       projectile.x += projectile.vx * dt;
       projectile.phase += dt * 9;
 
@@ -828,9 +938,10 @@
         continue;
       }
 
-      const hitsPlayer = Math.abs(projectile.x - player.x) < 20
-        && projectile.y > player.y - 78
-        && projectile.y < player.y - 8;
+      const hitsPlayer = Math.max(projectile.x, projectile.previousX) + PROJECTILE_HALF_W > player.x - 12
+        && Math.min(projectile.x, projectile.previousX) - PROJECTILE_HALF_W < player.x + 12
+        && projectile.y + PROJECTILE_HALF_H > player.y - 68
+        && projectile.y - PROJECTILE_HALF_H < player.y - 12;
       if (hitsPlayer) {
         damagePlayer(projectile);
         burst(projectile.x, projectile.y, "#4adfff", 10);
@@ -851,9 +962,9 @@
   }
 
   function update(dt) {
-    worldTime += dt;
-    if (wasPressed("KeyR")) resetGame();
+    if (wasPressed("KeyR") && mode !== "loading") resetGame();
     if (mode !== "playing") return;
+    worldTime += dt;
 
     if (hitStop > 0) {
       hitStop -= dt;
@@ -926,34 +1037,26 @@
   function drawPlayer() {
     const flash = player.invuln > 0 && Math.floor(player.invuln * 18) % 2 === 0;
     if (flash) ctx.globalAlpha = 0.48;
-    const flip = player.facing > 0;
-
+    let row = 0, frame = Math.floor(worldTime * 4) % 4;
     if (player.state === "dead") {
-      const f = Math.min(7, Math.floor(player.stateTime / 0.115));
-      drawFrame(images.catDamage, f % 4, 128, 96, player.x - 64, player.y - 96, flip, 1 + Math.floor(f / 4));
+      row = 5; frame = Math.min(3, 1 + Math.floor(player.stateTime / 0.25));
     } else if (player.state === "hurt") {
-      const f = Math.min(3, Math.floor(player.stateTime / 0.095));
-      drawFrame(images.catDamage, f, 128, 96, player.x - 64, player.y - 96, flip);
+      row = 5; frame = 0;
     } else if (player.state === "attack") {
-      const f = Math.min(5, Math.floor(player.stateTime / 0.072));
-      drawFrame(images.catAttack, f, 128, 80, player.x - 64, player.y - 80, flip);
-      const slashFlip = player.facing < 0;
-      drawFrame(images.catFx, f, 128, 96, player.x - 64 + player.facing * 43, player.y - 91, slashFlip);
+      row = 3; frame = player.stateTime < 0.07 ? 0 : player.stateTime < 0.14 ? 1 : player.stateTime < 0.3 ? 2 : 3;
     } else if (player.state === "ranged") {
-      const f = Math.min(5, Math.floor(player.stateTime / 0.083));
-      drawFrame(images.catRanged, f, 128, 80, player.x - 64, player.y - 80, flip);
-      drawFrame(images.catFx, f, 128, 96, player.x - 64 + player.facing * 73, player.y - 92, flip, 1);
+      row = 4; frame = player.stateTime < 0.08 ? 0 : player.stateTime < 0.17 ? 1 : player.stateTime < 0.36 ? 2 : 3;
     } else if (player.state === "air") {
-      const f = player.vy < -230 ? 1 : player.vy < -40 ? 2 : player.vy < 170 ? 4 : 6;
-      drawFrame(images.catAir, f, 96, 96, player.x - 48, player.y - 96, flip);
+      row = 2; frame = player.vy < -180 ? 0 : player.vy < 100 ? 1 : 2;
     } else if (player.state === "run") {
-      // Four deliberately distinct poses: contact, passing, opposite contact,
-      // passing. The slower cadence keeps the heavy armored stride readable.
-      const f = Math.floor(worldTime * 9) % 4;
-      drawFrame(images.catRun, f, 96, 80, player.x - 48, player.y - 80, flip);
-    } else {
-      const f = Math.floor(worldTime * 6) % 6;
-      drawFrame(images.catIdle, f, 96, 80, player.x - 48, player.y - 80, flip);
+      row = 1; frame = Math.floor(worldTime * 9) % 4;
+    }
+    drawDetailedFrame("catDetailed", row, frame, player);
+    // Keep the established beam reach/FX and damage timings, independent of art.
+    if (player.state === "ranged") {
+      const f = Math.min(5, Math.floor(player.stateTime / 0.083));
+      drawFrame(images.catFx, f, 128, 96, player.x - 64 + player.facing * 73,
+        player.y - 92, player.facing > 0, 1);
     }
     ctx.globalAlpha = 1;
   }
@@ -969,25 +1072,49 @@
       if (mouse.state === "hurt") { row = 3; frame = 0; }
       if (mouse.state === "dead") { row = 3; frame = Math.min(3, Math.floor(mouse.stateTime / 0.22)); }
       drawZombieFrame(mouse, row, frame);
+      drawZombieRegeneration(mouse);
       return;
     }
-    const flip = mouse.facing > 0;
+    let row = 0, frame = Math.floor((worldTime + mouse.animOffset) * 4) % 4;
     if (mouse.state === "dead") {
-      const f = Math.min(7, Math.floor(mouse.stateTime / 0.105));
-      drawFrame(images.mouseDeath, f, 104, 64, mouse.x - 52, mouse.y - 64, flip);
+      row = 3; frame = Math.min(3, 1 + Math.floor(mouse.stateTime / 0.22));
     } else if (mouse.state === "hurt") {
-      const f = Math.min(3, Math.floor(mouse.stateTime / 0.085));
-      drawFrame(images.mouseHurt, f, 88, 64, mouse.x - 44, mouse.y - 64, flip);
+      row = 3; frame = 0;
     } else if (mouse.state === "attack") {
-      const f = Math.min(5, Math.floor(mouse.stateTime / 0.11));
-      drawFrame(images.mouseAttack, f, 96, 64, mouse.x - 48, mouse.y - 64, flip);
+      row = 2; frame = mouse.stateTime < 0.14 ? 0 : mouse.stateTime < 0.27 ? 1 : mouse.stateTime < 0.46 ? 2 : 3;
     } else if (mouse.state === "run") {
-      const f = Math.floor((worldTime + mouse.animOffset) * 10) % 8;
-      drawFrame(images.mouseRun, f, 80, 64, mouse.x - 40, mouse.y - 64, flip);
-    } else {
-      const f = Math.floor((worldTime + mouse.animOffset) * 5) % 4;
-      drawFrame(images.mouseIdle, f, 64, 64, mouse.x - 32, mouse.y - 64, flip);
+      row = 1; frame = Math.floor((worldTime + mouse.animOffset) * 9) % 4;
     }
+    drawDetailedFrame("mouseDetailed", row, frame, mouse);
+  }
+
+  function drawDetailedFrame(name, row, frame, entity) {
+    const atlas = window.ArenaAtlas[name];
+    const [sx, sy, sw, sh, anchorX, feet] = atlas.rows[row][frame];
+    ctx.save();
+    ctx.translate(Math.round(entity.x), Math.round(entity.y));
+    if (entity.facing < 0) ctx.scale(-1, 1);
+    ctx.drawImage(images[name], sx, sy, sw, sh,
+      -anchorX * atlas.scale, -feet * atlas.scale, sw * atlas.scale, sh * atlas.scale);
+    ctx.restore();
+  }
+
+  function drawZombieRegeneration(mouse) {
+    if (mouse.state === "dead" || (mouse.health === mouse.maxHealth && mouse.regenPulse <= 0)) return;
+    ctx.save();
+    ctx.fillStyle = "#101708e6";
+    ctx.fillRect(mouse.x - 25, mouse.y - 96, 50, 7);
+    ctx.fillStyle = mouse.regenPulse > 0 ? "#d0ff83" : "#84b74a";
+    ctx.fillRect(mouse.x - 24, mouse.y - 95, 48 * mouse.health / mouse.maxHealth, 4);
+    ctx.fillStyle = "#bbe976";
+    ctx.fillRect(mouse.x - 24, mouse.y - 90, 48 * mouse.regenTime / ZOMBIE_REGEN_SECONDS, 1);
+    if (mouse.regenPulse > 0) {
+      ctx.globalAlpha = Math.min(1, mouse.regenPulse);
+      ctx.font = "bold 12px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("+1", mouse.x, mouse.y - 101 - (1.4 - mouse.regenPulse) * 16);
+    }
+    ctx.restore();
   }
 
   // The source sheet has uneven row spacing: a regular 4x4 cut includes
@@ -1016,24 +1143,50 @@
   }
 
   function drawSorcerer(sorcerer) {
-    const flip = sorcerer.facing < 0;
     let row = 0;
     let frame = Math.floor((worldTime + sorcerer.animOffset) * 4) % 4;
-
+    ctx.save();
     if (sorcerer.state === "cast") {
       row = 1;
-      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.19));
+      frame = sorcerer.stateTime < 0.2 ? 0 : sorcerer.stateTime < 0.42 ? 1 : sorcerer.stateTime < 0.66 ? 2 : 3;
     } else if (sorcerer.state === "teleport") {
-      row = sorcerer.stateTime < 0.12 ? 2 : 3;
-      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.13));
+      ctx.globalAlpha = sorcerer.teleported
+        ? Math.max(0, Math.min(1, (sorcerer.stateTime - TELEPORT_VANISH_TIME - 0.12) / 0.5))
+        : Math.max(0, 1 - sorcerer.stateTime / TELEPORT_VANISH_TIME);
     } else if (sorcerer.state === "dead") {
-      row = 3;
-      frame = Math.min(3, Math.floor(sorcerer.stateTime / 0.12));
-      ctx.globalAlpha = Math.max(0, 1 - sorcerer.stateTime * 1.5);
+      row = 2;
+      frame = Math.min(3, 1 + Math.floor(sorcerer.stateTime / 0.22));
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, sorcerer.stateTime - 0.9));
     }
+    drawDetailedFrame("sorcererDetailed", row, frame, sorcerer);
+    ctx.restore();
+    if (sorcerer.state === "teleport") {
+      const t = sorcerer.stateTime;
+      if (!sorcerer.teleported) drawTeleportMist(sorcerer, Math.min(1, t / 0.3), t);
+      else {
+        const remaining = Math.max(0, 1 - (t - TELEPORT_VANISH_TIME) / (TELEPORT_DURATION - TELEPORT_VANISH_TIME));
+        drawTeleportMist(sorcerer, remaining, t);
+        if (sorcerer.teleportTarget) drawTeleportMist(sorcerer.teleportOrigin, remaining * 0.55, t);
+      }
+    }
+  }
 
-    drawFrame(images.sorcerer, frame, 128, 128, sorcerer.x - 48, sorcerer.y - 96, flip, row, 96, 96);
-    ctx.globalAlpha = 1;
+  function drawTeleportMist(point, strength, phase) {
+    if (!point || strength <= 0) return;
+    ctx.save();
+    for (let i = 0; i < 12; i += 1) {
+      const angle = i * 2.4 + phase * 2;
+      const x = point.x + Math.sin(angle) * 22;
+      const y = point.y - 10 - i * 6 + Math.cos(angle * 1.2) * 8;
+      const radius = 19 + Math.sin(angle) * 5;
+      const fog = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      fog.addColorStop(0, `rgba(122,210,255,${strength * 0.62})`);
+      fog.addColorStop(0.45, `rgba(46,110,220,${strength * 0.45})`);
+      fog.addColorStop(1, "rgba(36,58,130,0)");
+      ctx.fillStyle = fog;
+      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
+    ctx.restore();
   }
 
   function drawProjectiles() {
@@ -1082,6 +1235,16 @@
   }
 
   function drawHud() {
+    touchHud.hidden = !touchEnabled || !["playing", "paused"].includes(mode);
+    if (touchEnabled) {
+      const alive = allEnemies().filter(enemy => enemy.state !== "dead").length;
+      // DOM text remains readable in CSS pixels even when the canvas is small.
+      const fields = [[touchHealth, `♥ ${player.health}/${player.maxHealth}`],
+        [touchEnemies, `Враги ${alive}/${allEnemies().length}`],
+        [touchBeam, player.beamCooldown <= 0 ? "Луч ✓" : `Луч ${Math.round(100 * (1 - player.beamCooldown / 1.05))}%`]];
+      for (const [field, value] of fields) if (field.textContent !== value) field.textContent = value;
+      return;
+    }
     ctx.fillStyle = "#080606d9";
     ctx.fillRect(8, 8, 198, 54);
     ctx.strokeStyle = "#9f6b24";
@@ -1150,23 +1313,62 @@
   }
 
   window.addEventListener("keydown", event => {
+    // Let focused UI buttons retain their native Enter/Space behavior.
+    if (event.target?.tagName === "BUTTON" && ["Space", "Enter"].includes(event.code)) return;
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "Space"].includes(event.code)) event.preventDefault();
-    if (!event.repeat) pressed.add(event.code);
-    keys.add(event.code);
+    input.keyDown(event.code, event.repeat);
     ensureAudio();
     if (!event.repeat && event.code === "Escape" && mode === "cinematic") finishVictoryCinematic();
+    else if (!event.repeat && event.code === "Escape") { if (immersive) setImmersive(false); pauseGame(); syncFullscreenButton(); }
+    if (!event.repeat && event.code === "KeyP") togglePause();
     if (!event.repeat && event.code === "KeyF") toggleFullscreen();
     if (!event.repeat && event.code === "KeyM") toggleMusic();
   });
 
   window.addEventListener("keyup", event => keys.delete(event.code));
-  window.addEventListener("blur", () => keys.clear());
+  window.addEventListener("blur", pauseGame);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
+  window.addEventListener("pagehide", pauseGame);
+  window.addEventListener("orientationchange", () => { pauseGame(); resizeGameSurface(); });
 
   startButton.addEventListener("click", () => {
     ensureAudio();
-    resetGame();
+    if (mode === "paused") resumeGame();
+    else resetGame();
+    startButton.blur();
   });
 
+  for (const button of touchButtons) {
+    button.addEventListener("pointerdown", event => {
+      if (mode !== "playing" || (event.pointerType === "mouse" && event.button !== 0)) return;
+      event.preventDefault();
+      ensureAudio();
+      button.setPointerCapture(event.pointerId);
+      input.pointerDown(event.pointerId, button.dataset.code);
+      syncTouchButtons();
+    });
+    button.addEventListener("pointermove", event => {
+      const code = input.pointers.get(event.pointerId);
+      if (!["KeyA", "KeyD"].includes(code)) return;
+      const next = document.elementFromPoint(event.clientX, event.clientY)?.closest(".touch-button");
+      if (next && ["KeyA", "KeyD"].includes(next.dataset.code) && next.dataset.code !== code) {
+        input.pointerDown(event.pointerId, next.dataset.code);
+        syncTouchButtons();
+      }
+    });
+    const release = event => { input.pointers.delete(event.pointerId); syncTouchButtons(); };
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("lostpointercapture", release);
+    button.addEventListener("contextmenu", event => event.preventDefault());
+    button.addEventListener("click", event => {
+      // Keyboard/assistive activation, without duplicating a pointer tap.
+      if (event.detail === 0 && mode === "playing") pressed.add(button.dataset.code);
+    });
+  }
+  touchToggle.addEventListener("click", () => setTouchEnabled(!touchEnabled));
+  pauseButton.addEventListener("click", togglePause);
+  pauseButton.disabled = true;
   fullscreenButton.addEventListener("click", toggleFullscreen);
   musicButton.addEventListener("click", toggleMusic);
   cinematicSkipButton.addEventListener("click", finishVictoryCinematic);
@@ -1183,14 +1385,14 @@
   musicButton.setAttribute("aria-pressed", "true");
 
   document.addEventListener("fullscreenchange", () => {
-    const active = Boolean(document.fullscreenElement);
-    fullscreenButton.textContent = active ? "×" : "⛶";
-    fullscreenButton.setAttribute("aria-label", active ? "Выйти из полноэкранного режима" : "Перейти в полноэкранный режим");
-    resizeGameSurface();
+    clearInput();
+    syncFullscreenButton();
   });
 
   window.addEventListener("resize", resizeGameSurface);
+  window.visualViewport?.addEventListener("resize", resizeGameSurface);
 
+  setTouchEnabled(touchEnabled);
   resizeGameSurface();
   loadAssets();
   requestAnimationFrame(loop);
