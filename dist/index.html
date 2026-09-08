@@ -6,11 +6,12 @@
   <meta name="theme-color" content="#080707">
   <meta name="description" content="Двухуровневая браузерная игра о Коте-Императоре: платформер и ретро-FPS.">
   <title>Кот-Император: Дворцовая зачистка</title>
-  <link rel="stylesheet" href="styles.css?v=fps-20260908">
+  <link rel="stylesheet" href="styles.css?v=menu-audio-20260908">
 </head>
 <body>
   <main class="game-shell" aria-label="Кот-Император: испытательная арена">
     <div class="corner-controls" aria-label="Настройки игры">
+      <button id="menu-button" class="tool-button" type="button" aria-label="Главное меню" title="Главное меню">⌂</button>
       <button id="music-button" class="tool-button" type="button" aria-label="Выключить музыку" title="Музыка: M">♫</button>
       <button id="fullscreen-button" class="tool-button" type="button" aria-label="Перейти в полноэкранный режим" title="Полный экран: F">⛶</button>
       <button id="pause-button" class="tool-button" type="button" aria-label="Пауза" title="Пауза: P">Ⅱ</button>
@@ -31,6 +32,23 @@
         <h1>КОТ-ИМПЕРАТОР</h1>
         <p id="load-status">Подготовка священного вооружения…</p>
         <button id="start" type="button" disabled>ВСТУПИТЬ В БОЙ</button>
+      </section>
+      <section id="main-menu" class="overlay main-menu" hidden aria-label="Главное меню">
+        <p class="eyebrow">ДВОРЕЦ ЖДЁТ ПОВЕЛИТЕЛЯ</p>
+        <h1>КОТ-ИМПЕРАТОР</h1>
+        <p class="menu-intro">Выберите испытание. Уровни запускаются независимо.</p>
+        <div class="level-choice">
+          <button id="choose-level-1" class="level-card" type="button">
+            <strong>УРОВЕНЬ I</strong>
+            <span>Испытательная арена</span>
+            <small>Платформер · меч и императорский луч</small>
+          </button>
+          <button id="choose-level-2" class="level-card" type="button">
+            <strong>УРОВЕНЬ II</strong>
+            <span>Зачистка внутренних покоев</span>
+            <small>Ретро-FPS · дворцовый автомат</small>
+          </button>
+        </div>
       </section>
       <section id="fps-overlay" class="overlay fps-overlay" hidden aria-live="polite">
         <p class="eyebrow">ДВОРЕЦ КОТА-ИМПЕРАТОРА</p>
@@ -82,8 +100,8 @@
   </main>
   <script src="input.js?v=upgrade-20260907"></script>
   <script src="atlas.js?v=motion-20260908"></script>
-  <script src="game.js?v=fps-20260908"></script>
+  <script src="game.js?v=menu-audio-20260908"></script>
   <script src="level2-core.js?v=fps-20260908"></script>
-  <script src="level2.js?v=fps-20260908"></script>
+  <script src="level2.js?v=menu-audio-20260908"></script>
 </body>
 </html>

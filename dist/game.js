@@ -10,6 +10,7 @@
   const gameShell = document.querySelector(".game-shell");
   const gameFrame = document.querySelector("#game-frame");
   const fullscreenButton = document.querySelector("#fullscreen-button");
+  const menuButton = document.querySelector("#menu-button");
   const musicButton = document.querySelector("#music-button");
   const pauseButton = document.querySelector("#pause-button");
   const touchToggle = document.querySelector("#touch-toggle");
@@ -26,6 +27,9 @@
   const victoryVideo = document.querySelector("#victory-video");
   const cinematicPlayButton = document.querySelector("#cinematic-play");
   const cinematicSkipButton = document.querySelector("#cinematic-skip");
+  const mainMenu = document.querySelector("#main-menu");
+  const chooseLevelOne = document.querySelector("#choose-level-1");
+  const chooseLevelTwo = document.querySelector("#choose-level-2");
 
   const W = 640;
   const H = 360;
@@ -209,10 +213,8 @@
       Object.assign(images, Object.fromEntries(entries));
       if (window.CatEmperorLevel2?.active) return;
       mode = "ready";
-      status.textContent = "Пять культистов, два колдуна и одна мышь-зомби.";
-      startButton.textContent = "ВСТУПИТЬ В БОЙ";
-      startButton.disabled = false;
       draw();
+      showMainMenu();
     } catch (error) {
       status.textContent = error.message;
     }
@@ -268,6 +270,8 @@
     cameraX = 0;
     cameraY = WORLD_H - H;
     mode = "playing";
+    document.body.classList.remove("menu-active", "fps-active");
+    mainMenu.hidden = true;
     pauseButton.disabled = false;
     pauseButton.setAttribute("aria-label", "Пауза");
     overlay.hidden = true;
@@ -330,11 +334,42 @@
     victoryVideo.pause();
     victoryCinematic.hidden = true;
     cinematicPlayButton.hidden = true;
-    if (window.CatEmperorLevel2) {
-      window.CatEmperorLevel2.start({ fromLevel1: true });
-      return;
-    }
-    showEnd(true);
+    showMainMenu();
+  }
+
+  function showMainMenu() {
+    clearInput();
+    backgroundMusic.pause();
+    victoryVideo.pause();
+    victoryCinematic.hidden = true;
+    cinematicPlayButton.hidden = true;
+    window.CatEmperorLevel2?.stop();
+    mode = "menu";
+    document.body.classList.remove("fps-active");
+    document.body.classList.add("menu-active");
+    mainMenu.hidden = false;
+    overlay.hidden = true;
+    touchControls.hidden = true;
+    touchHud.hidden = true;
+    pauseButton.disabled = true;
+    document.exitPointerLock?.();
+    resizeGameSurface();
+  }
+
+  function startLevelOne() {
+    window.CatEmperorLevel2?.stop();
+    document.body.classList.remove("menu-active", "fps-active");
+    mainMenu.hidden = true;
+    touchControls.hidden = !touchEnabled;
+    resetGame();
+    resizeGameSurface();
+  }
+
+  function startLevelTwo() {
+    document.body.classList.remove("menu-active");
+    mainMenu.hidden = true;
+    window.CatEmperorLevel2?.start({ fromMenu: true });
+    resizeGameSurface();
   }
 
   function ensureAudio() {
@@ -1351,6 +1386,10 @@
     startButton.blur();
   });
 
+  chooseLevelOne.addEventListener("click", startLevelOne);
+  chooseLevelTwo.addEventListener("click", startLevelTwo);
+  menuButton.addEventListener("click", showMainMenu);
+
   for (const button of touchButtons) {
     button.addEventListener("pointerdown", event => {
       if (mode !== "playing" || (event.pointerType === "mouse" && event.button !== 0)) return;
@@ -1406,6 +1445,13 @@
     touchHud.hidden = true;
     pauseButton.disabled = false;
   });
+
+  window.CatEmperorApp = {
+    showMenu: showMainMenu,
+    playVictoryVideo: beginVictoryCinematic,
+    startLevelOne,
+    startLevelTwo
+  };
 
   document.addEventListener("fullscreenchange", () => {
     clearInput();

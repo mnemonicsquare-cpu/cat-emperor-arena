@@ -15,7 +15,12 @@ module.exports = function harness() {
     const handlers = {};
     const classes = new Set();
     const e = { id, handlers, children: [], style: { setProperty() {} }, dataset: {}, attributes: {},
-      classList: { toggle(name, active) { active ? classes.add(name) : classes.delete(name); } },
+      classList: {
+        toggle(name, active) { active ? classes.add(name) : classes.delete(name); },
+        add(...names) { for (const name of names) classes.add(name); },
+        remove(...names) { for (const name of names) classes.delete(name); },
+        contains(name) { return classes.has(name); }
+      },
       querySelector: s => element(id + s), getContext: () => context,
       getBoundingClientRect: () => ({height: 0}),
       addEventListener(type, fn) { (handlers[type] ||= []).push(fn); },

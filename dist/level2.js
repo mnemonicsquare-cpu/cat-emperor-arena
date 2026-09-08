@@ -33,6 +33,18 @@
     weapon: "assets/fps/weapon.webp",
     portrait: "assets/ui/cat_emperor_portrait.png"
   });
+  const AUDIO_PATHS = Object.freeze({
+    shot: "assets/audio/fps/weapon-shot.mp3",
+    reload: "assets/audio/fps/weapon-reload.mp3",
+    magic: "assets/audio/fps/magic-spell.mp3",
+    roar: "assets/audio/fps/zombie-roar.mp3",
+    door: "assets/audio/fps/door-open.mp3",
+    seal: "assets/audio/fps/seal-powerdown.mp3",
+    step1: "assets/audio/fps/step-1.mp3",
+    step2: "assets/audio/fps/step-2.mp3",
+    step3: "assets/audio/fps/step-3.mp3",
+    step4: "assets/audio/fps/step-4.mp3"
+  });
   const TYPE_ROW = Object.freeze({ cultist: 0, sorcerer: 1, zombie: 2 });
   const STATE_FRAME = Object.freeze({ idle: 0, walk: 1, attack: 2, hurt: 3, teleport: 3, dead: 4 });
   const PROP_FRAME = Object.freeze({ ammo: 0, health: 1, lever: 2, exit: 3 });
@@ -49,6 +61,7 @@
   let active = false;
   let mode = "inactive";
   let assetsPromise = null;
+  let levelMusicPromise = null;
   let lastTime = performance.now();
   let sceneW = 320, sceneH = 180;
   let sceneCanvas = document.createElement("canvas");
@@ -71,12 +84,23 @@
   let damageFlash = 0;
   let cameraKick = 0;
   let ejectedCase = null;
+  const samples = Object.fromEntries(Object.entries(AUDIO_PATHS).map(([name, src]) => {
+    const audio = new Audio(src); audio.preload = "auto"; return [name, audio];
+  }));
+  const levelMusicParts = Array.from({ length: 6 }, (_, index) =>
+    `assets/audio/fps/iron-titan-parts/iron-titan-orbit.mp3.part-${String(index).padStart(2, "0")}`
+  );
+  const levelMusic = new Audio();
+  levelMusic.loop = true;
+  levelMusic.preload = "auto";
+  levelMusic.volume = 0.26;
 
   const player = {
-    x: 4.5, y: 19.2, angle: -Math.PI / 2, pitch: 0,
-    radius: 0.2, health: 100, maxHealth: 100, ammo: 42,
-    maxAmmo: 90, fireCooldown: 0, invuln: 0, bob: 0,
-    moving: 0
+    x: 4.5, y: 19.2, angle: -Math.PI / 2,
+    radius: 0.2, health: 100, maxHealth: 100,
+    magazine: 12, reserve: 30, magazineSize: 12, maxAmmo: 90,
+    fireCooldown: 0, reloadTimer: 0, invuln: 0, bob: 0,
+    moving: 0, stepDistance: 0, stepIndex: 0
   };
 
   function setSceneResolution(width, height) {
@@ -111,6 +135,22 @@
     return assetsPromise;
   }
 
+  function prepareLevelMusic() {
+    if (levelMusicPromise) return levelMusicPromise;
+    levelMusicPromise = Promise.all(levelMusicParts.map(async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
+      return response.arrayBuffer();
+    })).then(parts => {
+      levelMusic.src = URL.createObjectURL(new Blob(parts, { type: "audio/mpeg" }));
+      levelMusic.load();
+    }).catch(error => {
+      levelMusicPromise = null;
+      throw error;
+    });
+    return levelMusicPromise;
+  }
+
   function prepareTextures() {
     const source = images.textures;
     const cellW = source.width / 4, cellH = source.height / 2;
@@ -141,20 +181,23 @@
     projectiles.length = 0;
     particles.length = 0;
     Object.assign(player, {
-      x: 4.5, y: 19.2, angle: -Math.PI / 2, pitch: 0, radius: 0.2,
-      health: 100, maxHealth: 100, ammo: 42, maxAmmo: 90,
-      fireCooldown: 0, invuln: 0, bob: 0, moving: 0
+      x: 4.5, y: 19.2, angle: -Math.PI / 2, radius: 0.2,
+      health: 100, maxHealth: 100, magazine: 12, reserve: 30,
+      magazineSize: 12, maxAmmo: 90, fireCooldown: 0, reloadTimer: 0,
+      invuln: 0, bob: 0, moving: 0, stepDistance: 0, stepIndex: 0
     });
     score = 0; kills = 0; elapsed = 0;
     recoil = 0; muzzleFlash = 0; damageFlash = 0; cameraKick = 0;
     ejectedCase = null; fireHeld = false; message = ""; messageTime = 0;
     nearbyInteraction = null;
+    levelMusic.currentTime = 0;
   }
 
   async function start(options = {}) {
     if (active) return;
     active = true;
     mode = "loading";
+    document.body.classList.remove("menu-active");
     document.body.classList.add("fps-active");
     cinematic.hidden = true;
     levelOneOverlay.hidden = true;
@@ -167,12 +210,11 @@
     resetLevel();
     try {
       await loadAssets();
+      prepareLevelMusic().catch(() => {});
       if (!active) return;
       mode = "intro";
       fpsTitle.textContent = "ВНУТРЕННИЕ ПОКОИ";
-      fpsStatus.textContent = options.fromLevel1
-        ? "Арена очищена, но дворец уже захвачен. Найдите механизм имперской печати."
-        : "Мыши проникли во дворец. Найдите механизм имперской печати.";
+      fpsStatus.textContent = "Мыши захватили внутренние покои. Найдите рычаг в правом крыле, снимите печать с северной двери и очистите тронный зал.";
       fpsAction.textContent = "НАЧАТЬ ЗАЧИСТКУ";
       fpsAction.hidden = false;
       render();
@@ -192,8 +234,9 @@
     pauseButton.disabled = false;
     pauseButton.setAttribute("aria-label", "Пауза");
     ensureAudio();
+    setLevelMusic(true);
     if (!isTouchMode()) canvas.requestPointerLock?.();
-    announce("Найдите рычаг имперской печати", 3.2);
+    announce("Найдите рычаг в правом крыле дворца", 3.4);
   }
 
   function pause() {
@@ -204,6 +247,7 @@
     touchMove.pointer = null; touchMove.x = 0; touchMove.y = 0;
     lookTouch.pointer = null;
     fpsStickKnob.style.transform = "translate(0, 0)";
+    setLevelMusic(false);
     document.exitPointerLock?.();
     fpsOverlay.hidden = false;
     fpsTitle.textContent = "ПАУЗА";
@@ -219,6 +263,7 @@
     fpsOverlay.hidden = true;
     lastTime = performance.now();
     pauseButton.setAttribute("aria-label", "Пауза");
+    setLevelMusic(true);
     if (!isTouchMode()) canvas.requestPointerLock?.();
   }
 
@@ -230,6 +275,7 @@
   function showDefeat() {
     mode = "defeat";
     fireHeld = false;
+    setLevelMusic(false);
     document.exitPointerLock?.();
     fpsOverlay.hidden = false;
     fpsTitle.textContent = "ИМПЕРАТОР ПАЛ";
@@ -242,14 +288,11 @@
     if (mode === "victory") return;
     mode = "victory";
     fireHeld = false;
+    setLevelMusic(false);
     document.exitPointerLock?.();
-    fpsOverlay.hidden = false;
-    fpsTitle.textContent = "ПОКОИ ОЧИЩЕНЫ";
-    const minutes = Math.floor(elapsed / 60), seconds = Math.floor(elapsed % 60).toString().padStart(2, "0");
-    fpsStatus.textContent = `Время ${minutes}:${seconds} · мышей ${kills}/${enemies.length} · счёт ${score}`;
-    fpsAction.textContent = "ПРОЙТИ ЕЩЁ РАЗ";
-    fpsAction.hidden = false;
+    fpsOverlay.hidden = true;
     sound("victory");
+    window.CatEmperorApp?.playVictoryVideo();
   }
 
   function announce(text, duration = 2.2) {
@@ -270,6 +313,24 @@
     audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
     if (audioContext.state === "suspended") audioContext.resume().catch(() => {});
     return audioContext;
+  }
+
+  function playSample(name, volume = 0.7, playbackRate = 1) {
+    if (!soundEnabled || !samples[name]) return;
+    const voice = samples[name].cloneNode();
+    voice.volume = Math.max(0, Math.min(1, volume));
+    voice.playbackRate = playbackRate;
+    voice.play().catch(() => {});
+  }
+
+  function setLevelMusic(playing) {
+    if (!playing || !soundEnabled || mode !== "playing") {
+      levelMusic.pause();
+      return;
+    }
+    prepareLevelMusic().then(() => {
+      if (soundEnabled && mode === "playing") levelMusic.play().catch(() => {});
+    }).catch(() => {});
   }
 
   function tone(from, to, duration, type = "square", volume = 0.035, delay = 0) {
@@ -298,17 +359,30 @@
 
   function sound(kind) {
     if (!soundEnabled) return;
-    if (kind === "shot") { noise(0.115, 0.1); tone(92, 42, 0.16, "sawtooth", 0.055); tone(620, 160, 0.045, "square", 0.025); }
+    if (kind === "shot") { playSample("shot", 0.82, 0.96 + Math.random() * 0.07); }
     else if (kind === "hit") { tone(170, 70, 0.08, "square", 0.04); }
     else if (kind === "enemy-dead") { tone(115, 36, 0.24, "sawtooth", 0.042); }
     else if (kind === "hurt") { noise(0.12, 0.045); tone(80, 48, 0.18, "sawtooth", 0.05); }
-    else if (kind === "door") { tone(74, 42, 0.38, "square", 0.027); noise(0.28, 0.025); }
+    else if (kind === "door") { playSample("door", 0.66); }
     else if (kind === "pickup") { tone(340, 680, 0.12, "square", 0.033); }
-    else if (kind === "lever") { tone(120, 55, 0.13, "square", 0.04); tone(260, 520, 0.15, "square", 0.025, 0.13); }
-    else if (kind === "magic") { tone(580, 190, 0.28, "sine", 0.05); }
-    else if (kind === "teleport") { tone(170, 920, 0.38, "sine", 0.045); noise(0.3, 0.018); }
+    else if (kind === "lever") { playSample("seal", 0.75); tone(120, 55, 0.18, "square", 0.025); }
+    else if (kind === "magic") { playSample("magic", 0.68, 0.96 + Math.random() * 0.08); }
+    else if (kind === "teleport") { playSample("magic", 0.56, 1.2); tone(170, 920, 0.38, "sine", 0.025); }
     else if (kind === "claw") { tone(130, 62, 0.12, "sawtooth", 0.04); }
     else if (kind === "victory") { tone(330, 660, 0.22, "square", 0.035); tone(440, 880, 0.3, "square", 0.035, 0.18); }
+  }
+
+  function startReload() {
+    if (player.reloadTimer > 0 || player.reserve <= 0 || player.magazine >= player.magazineSize) return;
+    player.reloadTimer = 3.3;
+    playSample("reload", 0.58);
+    announce("ПЕРЕЗАРЯДКА", 1.1);
+  }
+
+  function finishReload() {
+    const loaded = Math.min(player.magazineSize - player.magazine, player.reserve);
+    player.magazine += loaded;
+    player.reserve -= loaded;
   }
 
   function update(dt) {
@@ -316,6 +390,10 @@
     elapsed += dt;
     messageTime = Math.max(0, messageTime - dt);
     player.fireCooldown = Math.max(0, player.fireCooldown - dt);
+    if (player.reloadTimer > 0) {
+      player.reloadTimer = Math.max(0, player.reloadTimer - dt);
+      if (player.reloadTimer === 0) finishReload();
+    } else if (player.magazine === 0 && player.reserve > 0) startReload();
     player.invuln = Math.max(0, player.invuln - dt);
     recoil = Math.max(0, recoil - dt * 7.4);
     muzzleFlash = Math.max(0, muzzleFlash - dt);
@@ -328,7 +406,7 @@
     updateProjectiles(dt);
     updateParticles(dt);
     updateInteraction();
-    if (fireHeld && player.fireCooldown <= 0) shoot();
+    if (fireHeld && player.fireCooldown <= 0 && player.reloadTimer <= 0) shoot();
 
     averageFrame = averageFrame * 0.96 + dt * 0.04;
     if (averageFrame > 1 / 43) slowFrames += 1; else slowFrames = Math.max(0, slowFrames - 2);
@@ -371,6 +449,12 @@
     const moved = Math.hypot(player.x - previousX, player.y - previousY);
     player.moving = moved / Math.max(dt, 0.001);
     player.bob += moved * 4.7;
+    player.stepDistance += moved;
+    if (player.stepDistance >= 0.72) {
+      player.stepDistance %= 0.72;
+      player.stepIndex = (player.stepIndex + 1) % 4;
+      playSample(`step${player.stepIndex + 1}`, 0.32, 0.94 + Math.random() * 0.1);
+    }
     collectPickups();
   }
 
@@ -378,9 +462,11 @@
     for (const prop of world.props) {
       if (!prop.active || !["ammo", "health"].includes(prop.type) || Math.hypot(prop.x - player.x, prop.y - player.y) > 0.48) continue;
       if (prop.type === "ammo") {
-        if (player.ammo >= player.maxAmmo) continue;
-        player.ammo = Math.min(player.maxAmmo, player.ammo + prop.amount);
-        announce(`Боеприпасы +${prop.amount}`);
+        const total = player.magazine + player.reserve;
+        if (total >= player.maxAmmo) continue;
+        const added = Math.min(prop.amount, player.maxAmmo - total);
+        player.reserve += added;
+        announce(`Боеприпасы +${added}`);
       } else {
         if (player.health >= player.maxHealth) continue;
         const restored = Math.min(prop.amount, player.maxHealth - player.health);
@@ -391,11 +477,13 @@
   }
 
   function shoot() {
-    if (mode !== "playing" || player.fireCooldown > 0) return;
-    if (player.ammo <= 0) {
-      player.fireCooldown = 0.28; tone(90, 72, 0.06, "square", 0.025); announce("Боеприпасы закончились", 1.1); return;
+    if (mode !== "playing" || player.fireCooldown > 0 || player.reloadTimer > 0) return;
+    if (player.magazine <= 0) {
+      if (player.reserve > 0) startReload();
+      else { player.fireCooldown = 0.28; tone(90, 72, 0.06, "square", 0.025); announce("Боеприпасы закончились", 1.1); }
+      return;
     }
-    player.ammo -= 1;
+    player.magazine -= 1;
     player.fireCooldown = 0.19;
     recoil = 1; muzzleFlash = 0.065; cameraKick = -2.5;
     ejectedCase = { time: 0, x: W * 0.72, y: H * 0.73, vx: 78, vy: -84 };
@@ -468,6 +556,7 @@
 
       const dx = player.x - enemy.x, dy = player.y - enemy.y, distance = Math.hypot(dx, dy);
       const seesPlayer = distance <= enemy.detection && core.lineOfSight(world, enemy.x, enemy.y, player.x, player.y);
+      if (seesPlayer && !enemy.alerted && enemy.type === "zombie") playSample("roar", 0.72, 0.94 + Math.random() * 0.08);
       if (seesPlayer) enemy.alerted = true;
       if (!enemy.alerted) { patrolEnemy(enemy, dt); continue; }
 
@@ -615,9 +704,9 @@
       const dx=prop.x-player.x,dy=prop.y-player.y,d=Math.hypot(dx,dy),dot=(dx*Math.cos(player.angle)+dy*Math.sin(player.angle))/(d||1);
       if (d < 1.2 && dot > 0.15 && (!nearbyInteraction || d < ray.distance)) nearbyInteraction={type:prop.type,value:prop};
     }
-    const label = nearbyInteraction?.type === "door" ? (nearbyInteraction.value.locked ? "ИМПЕРСКАЯ ПЕЧАТЬ ЗАПЕРТА" : "E · ОТКРЫТЬ ДВЕРЬ")
-      : nearbyInteraction?.type === "lever" ? "E · АКТИВИРОВАТЬ РЫЧАГ"
-      : nearbyInteraction?.type === "exit" ? (finalRemaining() ? "ВЫХОД ЗАПЕЧАТАН" : "E · ЗАВЕРШИТЬ УРОВЕНЬ") : "";
+    const label = nearbyInteraction?.type === "door" ? (nearbyInteraction.value.locked ? "СЕВЕРНАЯ ДВЕРЬ ЗАПЕЧАТАНА" : "E · ОТКРЫТЬ ДВЕРЬ")
+      : nearbyInteraction?.type === "lever" ? "E · СНЯТЬ ИМПЕРСКУЮ ПЕЧАТЬ"
+      : nearbyInteraction?.type === "exit" ? (finalRemaining() ? "ВЫХОД ЗАКРЫТ: ТРОННЫЙ ЗАЛ НЕ ОЧИЩЕН" : "E · ПОКИНУТЬ УРОВЕНЬ") : "";
     fpsPrompt.textContent = label;
     fpsPrompt.hidden = !label;
     fpsUse.hidden = !isTouchMode() || !nearbyInteraction;
@@ -628,12 +717,12 @@
     if (mode !== "playing" || !nearbyInteraction) return;
     const { type, value } = nearbyInteraction;
     if (type === "door") {
-      if (value.locked) { announce("Имперская печать: требуется дворцовый механизм", 2.6); tone(62,50,.12,"square",.03); return; }
+      if (value.locked) { announce("Найдите рычаг в правом крыле дворца", 2.6); tone(62,50,.12,"square",.03); return; }
       if (value.target < 1) { value.target = 1; sound("door"); }
     } else if (type === "lever" && !value.pulled) {
       value.pulled = true;
       world.doors.get(core.key(12,5)).locked = false;
-      score += 150; sound("lever"); announce("Имперская печать снята. Вернитесь в центральный зал.", 4);
+      score += 150; sound("lever"); announce("Северная дверь разблокирована. Вернитесь в центральный зал.", 4);
     } else if (type === "exit") {
       if (finalRemaining()) announce(`Выход запечатан: осталось ${finalRemaining()}`, 2.2);
       else showVictory();
@@ -673,7 +762,7 @@
   function renderWorld() {
     const data=sceneImage.data, dirX=Math.cos(player.angle),dirY=Math.sin(player.angle),planeSize=Math.tan(FOV/2);
     const planeX=-dirY*planeSize,planeY=dirX*planeSize;
-    const bob=Math.sin(player.bob)*Math.min(1.3,player.moving*.38),horizon=Math.round(sceneH/2+player.pitch*.5+bob+cameraKick*.5);
+    const bob=Math.sin(player.bob)*Math.min(1.3,player.moving*.38),horizon=Math.round(sceneH/2+bob+cameraKick*.5);
     data.fill(0);
     const leftX=dirX-planeX,leftY=dirY-planeY,rightX=dirX+planeX,rightY=dirY+planeY;
     for(let y=0;y<sceneH;y+=1){
@@ -719,7 +808,7 @@
     const tx=inv*(dirY*dx-dirX*dy),ty=inv*(-planeY*dx+planeX*dy);
     if(ty<=.08)return;
     const screenX=Math.floor(sceneW/2*(1+tx/ty));
-    const bob=Math.sin(player.bob)*Math.min(1.3,player.moving*.38),horizon=Math.round(sceneH/2+player.pitch*.5+bob+cameraKick*.5);
+    const bob=Math.sin(player.bob)*Math.min(1.3,player.moving*.38),horizon=Math.round(sceneH/2+bob+cameraKick*.5);
     if(sprite.kind==="projectile"||sprite.kind==="particle"){
       const size=Math.max(2,Math.min(14,sceneH/ty*(sprite.kind==="projectile"?.22:.055))),x=Math.round(screenX-size/2),y=Math.round(horizon-size*.7);
       if(screenX>=0&&screenX<sceneW&&ty<zBuffer[Math.max(0,Math.min(sceneW-1,screenX))]){
@@ -758,10 +847,10 @@
     if(!images.weapon)return;
     const bobX=Math.sin(player.bob*.5)*Math.min(3,player.moving),bobY=Math.abs(Math.cos(player.bob))*Math.min(2.4,player.moving*.7);
     const width=354,height=images.weapon.height/images.weapon.width*width;
-    const x=W/2-width/2+24+bobX-recoil*4,y=H-height+48+bobY+recoil*15;
+    const x=W/2-width/2+40+bobX-recoil*4,y=H-height+19+bobY+recoil*15;
     ctx.drawImage(images.weapon,x,y,width,height);
     if(muzzleFlash>0){
-      const mx=W*.485-recoil*2,my=H*.565+recoil*5;
+      const mx=W/2,my=H/2;
       ctx.fillStyle="#fff6bd";ctx.fillRect(mx-4,my-8,8,17);ctx.fillStyle="#ffb229";ctx.fillRect(mx-10,my-3,20,6);ctx.fillStyle="#e75b16";ctx.fillRect(mx-3,my-13,6,26);
     }
     if(ejectedCase){ctx.save();ctx.translate(ejectedCase.x,ejectedCase.y);ctx.rotate(ejectedCase.time*9);ctx.fillStyle="#d69b31";ctx.fillRect(-3,-1,6,2);ctx.restore();}
@@ -775,19 +864,20 @@
     ctx.drawImage(images.portrait,8,top+5,31,31);
     if(player.health<34){ctx.fillStyle="#9e101066";ctx.fillRect(8,top+5,31,31);}else if(player.health<67){ctx.fillStyle="#b95e1640";ctx.fillRect(8,top+5,31,31);}
     ctx.font="bold 9px monospace";ctx.fillStyle="#c79a51";ctx.fillText("ЗДОРОВЬЕ",45,top+13);ctx.fillStyle=player.health<30?"#ff453c":"#f0d277";ctx.font="bold 18px monospace";ctx.fillText(String(player.health).padStart(3,"0"),45,top+31);
-    ctx.textAlign="right";ctx.font="bold 9px monospace";ctx.fillStyle="#c79a51";ctx.fillText("БОЕПРИПАСЫ",W-10,top+13);ctx.fillStyle=player.ammo<8?"#ff6a3d":"#f0d277";ctx.font="bold 18px monospace";ctx.fillText(String(player.ammo).padStart(3,"0"),W-10,top+31);
+    ctx.textAlign="right";ctx.font="bold 9px monospace";ctx.fillStyle="#c79a51";ctx.fillText(player.reloadTimer>0?"ПЕРЕЗАРЯДКА":"МАГАЗИН / ЗАПАС",W-10,top+13);ctx.fillStyle=player.magazine<4?"#ff6a3d":"#f0d277";ctx.font="bold 18px monospace";ctx.fillText(`${String(player.magazine).padStart(2,"0")} / ${String(player.reserve).padStart(2,"0")}`,W-10,top+31);
     ctx.textAlign="center";ctx.font="bold 8px monospace";ctx.fillStyle="#a88a57";ctx.fillText(objectiveText(),W/2,top+16);ctx.fillStyle="#66563c";ctx.fillText(`МЫШИ ${enemies.length-kills}/${enemies.length}  ·  ${score}`,W/2,top+29);ctx.textAlign="left";
   }
 
   function objectiveText(){
     const lever=world.props.find(p=>p.type==="lever");
-    if(!lever.pulled)return "НАЙТИ МЕХАНИЗМ ПЕЧАТИ";
-    if(finalRemaining())return "ОЧИСТИТЬ ФИНАЛЬНУЮ ЗОНУ";
-    return "ВОЙТИ В ЗОЛОТОЙ ВЫХОД";
+    if(!lever.pulled)return "НАЙТИ И ОПУСТИТЬ РЫЧАГ В ПРАВОМ КРЫЛЕ";
+    if(player.y>5.5)return "ПРОЙТИ ЧЕРЕЗ СЕВЕРНУЮ ДВЕРЬ";
+    if(finalRemaining())return "ОЧИСТИТЬ ТРОННЫЙ ЗАЛ";
+    return "АКТИВИРОВАТЬ ЗОЛОТОЙ ВЫХОД";
   }
 
   function drawCrosshair(){
-    const x=W/2,y=H/2+player.pitch+cameraKick;
+    const x=W/2,y=H/2;
     ctx.fillStyle="#120b08";ctx.fillRect(x-7,y-1,5,3);ctx.fillRect(x+3,y-1,5,3);ctx.fillRect(x-1,y-7,3,5);ctx.fillRect(x-1,y+3,3,5);
     ctx.fillStyle="#fff1a0";ctx.fillRect(x-6,y,4,1);ctx.fillRect(x+3,y,4,1);ctx.fillRect(x,y-6,1,4);ctx.fillRect(x,y+3,1,4);
   }
@@ -816,18 +906,28 @@
     if(lookTouch.pointer===id)lookTouch.pointer=null;
   }
 
+  function stop(){
+    if(!active)return;
+    active=false;mode="inactive";fireHeld=false;keys.clear();
+    touchMove.pointer=null;touchMove.x=0;touchMove.y=0;lookTouch.pointer=null;
+    fpsStickKnob.style.transform="translate(0, 0)";
+    fpsOverlay.hidden=true;fpsPrompt.hidden=true;fpsTouch.hidden=true;
+    setLevelMusic(false);document.exitPointerLock?.();
+    document.body.classList.remove("fps-active");
+  }
+
   fpsAction.addEventListener("click",()=>{if(mode==="paused")resume();else beginPlay(mode==="defeat"||mode==="victory");fpsAction.blur();});
   window.addEventListener("keydown",handleKeyDown,{passive:false});
   window.addEventListener("keyup",event=>keys.delete(event.code));
   canvas.addEventListener("mousedown",event=>{if(!active||mode!=="playing"||event.button!==0)return;ensureAudio();if(document.pointerLockElement!==canvas)canvas.requestPointerLock?.();fireHeld=true;shoot();});
   window.addEventListener("mouseup",event=>{if(event.button===0)fireHeld=false;});
-  document.addEventListener("mousemove",event=>{if(!active||mode!=="playing"||document.pointerLockElement!==canvas)return;player.angle+=event.movementX*.00245;player.pitch=Math.max(-38,Math.min(38,player.pitch+event.movementY*.16));});
+  document.addEventListener("mousemove",event=>{if(!active||mode!=="playing"||document.pointerLockElement!==canvas)return;player.angle+=event.movementX*.00245;});
   gameFrame.addEventListener("contextmenu",event=>{if(active)event.preventDefault();});
   fpsStick.addEventListener("pointerdown",event=>{event.preventDefault();ensureAudio();touchMove.pointer=event.pointerId;fpsStick.setPointerCapture(event.pointerId);});
   fpsStick.addEventListener("pointermove",event=>{if(touchMove.pointer!==event.pointerId)return;const r=fpsStick.getBoundingClientRect(),x=event.clientX-(r.left+r.width/2),y=event.clientY-(r.top+r.height/2),max=r.width*.34,length=Math.hypot(x,y),scale=length>max?max/length:1;touchMove.x=x*scale/max;touchMove.y=y*scale/max;fpsStickKnob.style.transform=`translate(${x*scale}px, ${y*scale}px)`;});
   for(const type of ["pointerup","pointercancel","lostpointercapture"])fpsStick.addEventListener(type,event=>releasePointer(event.pointerId));
   fpsLook.addEventListener("pointerdown",event=>{event.preventDefault();ensureAudio();lookTouch.pointer=event.pointerId;lookTouch.x=event.clientX;lookTouch.y=event.clientY;fpsLook.setPointerCapture(event.pointerId);});
-  fpsLook.addEventListener("pointermove",event=>{if(lookTouch.pointer!==event.pointerId||mode!=="playing")return;player.angle+=(event.clientX-lookTouch.x)*.006;player.pitch=Math.max(-38,Math.min(38,player.pitch+(event.clientY-lookTouch.y)*.32));lookTouch.x=event.clientX;lookTouch.y=event.clientY;});
+  fpsLook.addEventListener("pointermove",event=>{if(lookTouch.pointer!==event.pointerId||mode!=="playing")return;player.angle+=(event.clientX-lookTouch.x)*.006;lookTouch.x=event.clientX;lookTouch.y=event.clientY;});
   for(const type of ["pointerup","pointercancel","lostpointercapture"])fpsLook.addEventListener(type,event=>releasePointer(event.pointerId));
   fpsFire.addEventListener("pointerdown",event=>{event.preventDefault();ensureAudio();fpsFire.setPointerCapture(event.pointerId);fireHeld=true;shoot();fpsFire.classList.add("is-held");});
   const releaseFire=()=>{fireHeld=false;fpsFire.classList.remove("is-held");};
@@ -836,8 +936,8 @@
   musicButton.addEventListener("click",()=>{if(active)soundEnabled=musicButton.getAttribute("aria-pressed")==="true";});
   new MutationObserver(syncTouchMode).observe(gameShell,{attributes:true,attributeFilter:["class"]});
 
-  window.CatEmperorLevel2={start,get active(){return active;},get mode(){return mode;},pause,resume,togglePause,interact,shoot,
-    syncSound(enabled){soundEnabled=Boolean(enabled);},
+  window.CatEmperorLevel2={start,stop,get active(){return active;},get mode(){return mode;},pause,resume,togglePause,interact,shoot,
+    syncSound(enabled){soundEnabled=Boolean(enabled);setLevelMusic(soundEnabled&&mode==="playing");},
     _debug:{player,getWorld:()=>world,getEnemies:()=>enemies,update,finalRemaining,objectiveText}};
   requestAnimationFrame(frame);
   if(new URLSearchParams(location.search).get("level")==="2")start({direct:true});

@@ -19,6 +19,12 @@ body.fps-active {
   -webkit-touch-callout: none;
 }
 
+body.menu-active .corner-controls,
+body.menu-active .controls,
+body.menu-active .fps-controls,
+body.menu-active .touch-controls,
+body.menu-active .touch-hud { display: none !important; }
+
 body {
   display: grid;
   place-items: center;
@@ -91,6 +97,38 @@ canvas {
 }
 
 .overlay[hidden] { display: none; }
+
+.main-menu {
+  z-index: 9;
+  overflow: auto;
+  background:
+    linear-gradient(#050303b8, #050303e8),
+    radial-gradient(circle at 50% 28%, #8b451d88, transparent 48%);
+}
+.menu-intro {
+  margin: 13px 0 16px;
+  color: #ddd0b9;
+  font-size: clamp(0.72rem, 1.8vw, 0.95rem);
+}
+.level-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(560px, 94%);
+  gap: 12px;
+}
+.level-card {
+  display: grid;
+  min-height: 118px;
+  align-content: center;
+  gap: 7px;
+  border-color: #b68034;
+  padding: 15px;
+  background: linear-gradient(145deg, #40170f, #110b08 68%);
+  text-align: left;
+}
+.level-card strong { color: #ffe09a; font-size: clamp(0.82rem, 2vw, 1.05rem); }
+.level-card span { color: #eee0c5; font-size: clamp(0.68rem, 1.6vw, 0.88rem); }
+.level-card small { color: #a99474; font-size: clamp(0.56rem, 1.25vw, 0.72rem); line-height: 1.35; }
 
 .cinematic {
   position: absolute;
@@ -381,6 +419,12 @@ kbd {
   .overlay h1 { font-size: clamp(1.4rem, 6vw, 2.3rem); }
   #load-status { margin: 8px 0; font-size: 0.875rem; }
   body.fps-active .fps-controls { display: none; }
+  .main-menu { padding: 12px; }
+  .main-menu .eyebrow { display: block; }
+  .level-card { min-height: 92px; padding: 10px; }
+}
+@media (orientation: portrait) and (max-width: 520px) {
+  .level-choice { grid-template-columns: 1fr; max-width: 330px; }
 }
 
 .touch-controls {
