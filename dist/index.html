@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#080707">
-  <meta name="description" content="Промежуточная версия пиксельного платформера о Коте-Императоре.">
-  <title>Кот-Император: Испытательная арена</title>
-  <link rel="stylesheet" href="styles.css?v=upgrade-20260907">
+  <meta name="description" content="Двухуровневая браузерная игра о Коте-Императоре: платформер и ретро-FPS.">
+  <title>Кот-Император: Дворцовая зачистка</title>
+  <link rel="stylesheet" href="styles.css?v=fps-20260908">
 </head>
 <body>
   <main class="game-shell" aria-label="Кот-Император: испытательная арена">
@@ -32,6 +32,21 @@
         <p id="load-status">Подготовка священного вооружения…</p>
         <button id="start" type="button" disabled>ВСТУПИТЬ В БОЙ</button>
       </section>
+      <section id="fps-overlay" class="overlay fps-overlay" hidden aria-live="polite">
+        <p class="eyebrow">ДВОРЕЦ КОТА-ИМПЕРАТОРА</p>
+        <h2 id="fps-title">УРОВЕНЬ II</h2>
+        <p id="fps-status">Открываются внутренние покои…</p>
+        <button id="fps-action" type="button" hidden>НАЧАТЬ ЗАЧИСТКУ</button>
+      </section>
+      <div id="fps-prompt" class="fps-prompt" hidden></div>
+      <div id="fps-touch" class="fps-touch" hidden aria-label="Сенсорное FPS-управление">
+        <div id="fps-look" class="fps-look" aria-label="Обзор свайпом"></div>
+        <div id="fps-stick" class="fps-stick" aria-label="Стик движения">
+          <span id="fps-stick-knob"></span>
+        </div>
+        <button id="fps-use" class="fps-use" type="button" hidden>ДЕЙСТВИЕ</button>
+        <button id="fps-fire" class="fps-fire" type="button">ОГОНЬ</button>
+      </div>
     </div>
 
     <div id="touch-controls" class="touch-controls" aria-label="Сенсорное управление" hidden>
@@ -56,9 +71,19 @@
       <span><kbd>R</kbd> заново</span>
       <span><kbd>P</kbd> пауза</span>
     </div>
+    <div class="fps-controls" aria-label="FPS-управление">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> движение</span>
+      <span>мышь — обзор</span>
+      <span><kbd>ЛКМ</kbd> огонь</span>
+      <span><kbd>E</kbd> действие</span>
+      <span><kbd>R</kbd> заново</span>
+      <span><kbd>Esc</kbd>/<kbd>P</kbd> пауза</span>
+    </div>
   </main>
   <script src="input.js?v=upgrade-20260907"></script>
   <script src="atlas.js?v=motion-20260908"></script>
-  <script src="game.js?v=motion-20260908"></script>
+  <script src="game.js?v=fps-20260908"></script>
+  <script src="level2-core.js?v=fps-20260908"></script>
+  <script src="level2.js?v=fps-20260908"></script>
 </body>
 </html>

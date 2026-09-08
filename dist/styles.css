@@ -12,6 +12,13 @@ html, body {
   margin: 0;
 }
 
+body.fps-active {
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 body {
   display: grid;
   place-items: center;
@@ -25,6 +32,7 @@ body {
 }
 
 .game-shell {
+  position: relative;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -217,6 +225,143 @@ button:not(:disabled):active { transform: translateY(2px); box-shadow: inset 0 0
   font-size: 0.82rem;
 }
 
+.fps-controls { display: none; }
+body.fps-active .controls,
+body.fps-active .touch-controls,
+body.fps-active .touch-hud { display: none !important; }
+body.fps-active .fps-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
+  color: #b9aa91;
+  font-size: 0.82rem;
+}
+body.fps-active .corner-controls {
+  position: absolute;
+  top: 5px;
+  right: max(5px, env(safe-area-inset-right));
+  width: auto;
+  z-index: 8;
+}
+body.fps-active .corner-controls .tool-button {
+  width: clamp(32px, 7vw, 40px);
+  height: clamp(32px, 7vw, 40px);
+  background: #080605b8;
+}
+
+.fps-overlay { z-index: 6; background: #050303dc; }
+.fps-overlay h2 {
+  margin: 0;
+  color: #ffe09a;
+  font: 700 clamp(1.65rem, 5vw, 3.5rem)/1 Georgia, serif;
+  text-shadow: 3px 3px 0 #6d1b13, 0 0 24px #d4791b88;
+}
+#fps-status {
+  max-width: 34rem;
+  min-height: 1.4em;
+  margin: 16px 0;
+  color: #ddd0b9;
+  font-size: clamp(0.76rem, 1.8vw, 1rem);
+}
+.fps-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 13%;
+  z-index: 4;
+  max-width: 76%;
+  transform: translateX(-50%);
+  border: 1px solid #a97933;
+  padding: 5px 9px;
+  color: #ffe3a0;
+  background: #070504dc;
+  font-size: clamp(0.55rem, 1.5vw, 0.78rem);
+  text-align: center;
+  pointer-events: none;
+}
+.fps-prompt[hidden] { display: none; }
+
+.fps-touch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+  touch-action: none;
+}
+.fps-touch[hidden] { display: none; }
+.fps-look {
+  position: absolute;
+  inset: 0 0 12% 38%;
+  pointer-events: auto;
+  touch-action: none;
+}
+.fps-stick {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  width: clamp(76px, 17vw, 112px);
+  aspect-ratio: 1;
+  border: 2px solid #d4a34c99;
+  border-radius: 50%;
+  background: #17100bb0;
+  box-shadow: inset 0 0 0 8px #0b08068f;
+  pointer-events: auto;
+  touch-action: none;
+}
+.fps-stick::before,
+.fps-stick::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 14%; bottom: 14%;
+  width: 1px;
+  background: #c8994c55;
+}
+.fps-stick::after { top: 50%; left: 14%; right: 14%; width: auto; height: 1px; }
+.fps-stick span {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 42%;
+  aspect-ratio: 1;
+  margin: -21% 0 0 -21%;
+  border: 1px solid #ffe19a;
+  border-radius: 50%;
+  background: #74301ddb;
+  box-shadow: 0 3px 0 #160806;
+  will-change: transform;
+}
+.fps-fire,
+.fps-use {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  padding: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+.fps-fire {
+  bottom: max(13px, env(safe-area-inset-bottom));
+  width: clamp(68px, 15vw, 96px);
+  aspect-ratio: 1;
+  color: #fff0bd;
+  background: radial-gradient(circle, #a33c20, #40110d 70%);
+}
+.fps-fire.is-held { filter: brightness(1.45); transform: scale(0.95); }
+.fps-use {
+  right: max(25px, calc(env(safe-area-inset-right) + 10px));
+  bottom: clamp(90px, 19vw, 126px);
+  width: clamp(52px, 10vw, 70px);
+  aspect-ratio: 1;
+  border-color: #84c7e9;
+  color: #d9f3ff;
+  background: radial-gradient(circle, #245b73, #102630 72%);
+  font-size: clamp(0.48rem, 1.3vw, 0.7rem);
+}
+.fps-use[hidden] { display: none; }
+
 kbd {
   display: inline-block;
   min-width: 1.7em;
@@ -235,6 +380,7 @@ kbd {
   .overlay .eyebrow { display: none; }
   .overlay h1 { font-size: clamp(1.4rem, 6vw, 2.3rem); }
   #load-status { margin: 8px 0; font-size: 0.875rem; }
+  body.fps-active .fps-controls { display: none; }
 }
 
 .touch-controls {
@@ -294,6 +440,9 @@ kbd {
   .overlay .eyebrow { display: none; }
   .overlay h1 { font-size: 1.6rem; }
   #load-status { margin: 6px 0; }
+  .fps-stick { width: clamp(68px, 16vh, 92px); }
+  .fps-fire { width: clamp(62px, 15vh, 84px); }
+  .fps-use { bottom: clamp(72px, 18vh, 102px); width: clamp(48px, 11vh, 62px); }
 }
 .game-shell:fullscreen, .game-shell.immersive {
   position: fixed;
