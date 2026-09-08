@@ -39,7 +39,6 @@
   const MOUSE_GRAVITY = 1320;
   const MOUSE_DETECTION_RADIUS = 270;
   const SORCERER_LEVEL_TOLERANCE = 44;
-  const SORCERER_TELEPORT_RADIUS = 720;
   const PROJECTILE_SPEED = 105;
   const PROJECTILE_HALF_W = 3;
   const PROJECTILE_HALF_H = 2;
@@ -91,10 +90,10 @@
     tiles: "assets/tiles/arena_tileset.png",
     portrait: "assets/ui/cat_emperor_portrait.png",
     catFx: "assets/sprites/cat_emperor_fx.png",
-    catDetailed: "assets/sprites/cat_emperor_detailed.webp",
-    mouseDetailed: "assets/sprites/cultist_mouse_detailed.webp",
-    sorcererDetailed: "assets/sprites/sorcerer_mouse_detailed.webp",
-    zombie: "assets/sprites/zombie_mouse.png"
+    catDetailed: "assets/sprites/cat_clean.webp",
+    mouseDetailed: "assets/sprites/mouse_clean.webp",
+    sorcererDetailed: "assets/sprites/sorcerer_clean.webp",
+    zombieDetailed: "assets/sprites/zombie_clean.webp"
   };
 
   const backgroundMusicParts = Array.from(
@@ -129,7 +128,7 @@
     state: "idle", stateTime: 0,
     health: 5, maxHealth: 5,
     invuln: 0, coyote: 0, jumpBuffer: 0,
-    attackHit: false, beamHit: false, beamCooldown: 0
+    attackHit: false, beamHit: false, beamCooldown: 0, strideDistance: 0
   };
 
   const groundMouseSpawns = [
@@ -158,9 +157,9 @@
       x: spawn.x, y: spawn.y ?? GROUND_Y, vx: 0, vy: 0,
       facing: -1, grounded: true, state: "idle", stateTime: index * 0.08,
       health: spawn.type === "zombie" ? 8 : 4, maxHealth: spawn.type === "zombie" ? 8 : 4, attackHit: false,
-      patrolDir: index % 2 ? 1 : -1, alerted: false, jumpCooldown: 0,
+      patrolDir: index % 2 ? 1 : -1, alerted: false, jumpCooldown: 0, dropPlan: null,
       patrolMin: spawn.patrolMin, patrolMax: spawn.patrolMax,
-      animOffset: index * 0.13
+      animOffset: index * 0.13, strideDistance: 0
     };
   }
 
@@ -255,7 +254,7 @@
       x: 112, y: GROUND_Y, vx: 0, vy: 0, facing: 1, grounded: true,
       state: "idle", stateTime: 0, health: 5, invuln: 0,
       coyote: 0.08, jumpBuffer: 0, attackHit: false,
-      beamHit: false, beamCooldown: 0
+      beamHit: false, beamCooldown: 0, strideDistance: 0
     });
     mice.splice(0, mice.length, ...createMouseSpawns().map(createMouse));
     sorcerers.splice(0, sorcerers.length, ...sorcererSpawns.map(createSorcerer));
@@ -512,18 +511,21 @@
     const surfaces = [];
     const left = Math.max(48, cameraX + 56);
     const right = Math.min(WORLD_W - 48, cameraX + W - 56);
-    for (let x = left; x <= right; x += 40) surfaces.push({ x, y: GROUND_Y });
     for (const platform of platforms) {
-      for (let x = Math.max(left, platform.x + 28); x <= Math.min(right, platform.x + platform.w - 28); x += 32) {
+      const start = Math.max(left, platform.x + 28);
+      const end = Math.min(right, platform.x + platform.w - 28);
+      for (let x = start; x <= end; x += 16) {
         surfaces.push({ x, y: platform.y });
       }
+      if (start <= end) surfaces.push({ x: end, y: platform.y });
     }
     const candidates = surfaces.filter(point => validTeleportTarget(sorcerer, point));
     if (!candidates.length) return null;
-    candidates.sort((a, b) => (
-      Math.hypot(b.x - player.x, b.y - player.y) - Math.hypot(a.x - player.x, a.y - player.y)
-    ));
-    return candidates[Math.floor(Math.random() * Math.min(3, candidates.length))];
+    // Give every visible free platform a chance, not only distant locations.
+    const levels = [...new Set(candidates.map(point => point.y))];
+    const level = levels[Math.floor(Math.random() * levels.length)];
+    const points = candidates.filter(point => point.y === level);
+    return points[Math.floor(Math.random() * points.length)];
   }
 
   function validTeleportTarget(sorcerer, point) {
@@ -531,18 +533,17 @@
     // Fit the entire character, not only its centre, into the live viewport.
     const visible = point.x - 48 >= cameraX + 8 && point.x + 48 <= cameraX + W - 8
       && point.y - 104 >= cameraY + 8 && point.y <= cameraY + H - 12;
-    const supported = point.y === GROUND_Y || platforms.some(platform => (
+    const supported = platforms.some(platform => (
       point.y === platform.y && point.x >= platform.x + 28 && point.x <= platform.x + platform.w - 28
     ));
     const clearHeadroom = !platforms.some(platform => (
       platform.y !== point.y && point.x + 22 > platform.x && point.x - 22 < platform.x + platform.w
       && platform.y + 10 > point.y - 82 && platform.y < point.y - 2
     ));
-    const travel = Math.hypot(point.x - sorcerer.x, point.y - sorcerer.y);
-    const unoccupied = allEnemies().every(enemy => enemy === sorcerer || enemy.state === "dead"
-      || Math.hypot(point.x - enemy.x, point.y - enemy.y) >= 72);
-    return visible && supported && clearHeadroom && travel >= 96 && travel <= SORCERER_TELEPORT_RADIUS
-      && Math.hypot(point.x - player.x, point.y - player.y) >= 180 && unoccupied;
+    const overlaps = entity => Math.abs(point.x - entity.x) < 36 && Math.abs(point.y - entity.y) < 72;
+    const unoccupied = !overlaps(player) && allEnemies().every(enemy => enemy === sorcerer || enemy.state === "dead" || !overlaps(enemy));
+    const moved = Math.hypot(point.x - sorcerer.x, point.y - sorcerer.y) >= 8;
+    return visible && supported && clearHeadroom && moved && unoccupied;
   }
 
   function damageSorcerer(sorcerer, amount) {
@@ -658,6 +659,7 @@
     }
 
     const previousY = player.y;
+    const previousX = player.x;
     if (!player.grounded) player.vy += 1320 * dt;
     player.x += player.vx * dt;
     player.y += player.vy * dt;
@@ -692,6 +694,7 @@
       else if (Math.abs(player.vx) > 18) setState(player, "run");
       else setState(player, "idle");
     }
+    if (player.grounded && player.state === "run") player.strideDistance += Math.abs(player.x - previousX);
   }
 
   function updateMouse(mouse, dt) {
@@ -766,6 +769,7 @@
         pursuitX = climbPlatforms[0].x > mouse.x
           ? currentPlatform.x + currentPlatform.w + 18
           : currentPlatform.x - 18;
+        mouse.dropPlan ||= { y: currentPlatform.y, direction: Math.sign(pursuitX - mouse.x) };
       }
 
       if (
@@ -777,7 +781,13 @@
         const leftEdge = currentPlatform.x - 18;
         const rightEdge = currentPlatform.x + currentPlatform.w + 18;
         pursuitX = mouse.x - leftEdge < rightEdge - mouse.x ? leftEdge : rightEdge;
+        mouse.dropPlan ||= { y: currentPlatform.y, direction: Math.sign(pursuitX - mouse.x) };
       }
+      // Commit to stepping off until the feet have actually fallen below the
+      // shelf. Re-routing on the first unsupported frame used to step back onto
+      // it, alternating left/right every frame and preventing gravity from acting.
+      if (mouse.dropPlan && (mouse.y > mouse.dropPlan.y + 24 || mouse.y < mouse.dropPlan.y - 3)) mouse.dropPlan = null;
+      if (mouse.dropPlan) pursuitX = mouse.x + mouse.dropPlan.direction * 40;
       const pursuitDx = pursuitX - mouse.x;
 
       faceMouseToward(mouse, pursuitDx);
@@ -789,14 +799,14 @@
         && mouse.x <= navigationPlatform.x + navigationPlatform.w + 60;
       const nearAirborneTarget = !targetPlatform && Math.abs(dx) < 115;
 
-      if (mouse.grounded && mouse.jumpCooldown <= 0 && targetIsAbove && (nearTargetPlatform || nearAirborneTarget)) {
+      if (!mouse.dropPlan && mouse.grounded && mouse.jumpCooldown <= 0 && targetIsAbove && (nearTargetPlatform || nearAirborneTarget)) {
         mouse.vy = -MOUSE_JUMP_SPEED;
         mouse.grounded = false;
         mouse.jumpCooldown = 0.78;
         if (Math.abs(pursuitDx) > 5) mouse.vx = Math.sign(pursuitDx) * 90;
         burst(mouse.x, mouse.y - 1, "#694431", 4);
       }
-      setState(mouse, "run");
+      setState(mouse, Math.abs(mouse.vx) > 1 ? "run" : "idle");
     } else {
       if (mouse.x < mouse.patrolMin) mouse.patrolDir = 1;
       if (mouse.x > mouse.patrolMax) mouse.patrolDir = -1;
@@ -813,15 +823,17 @@
 
   function platformSupporting(entity) {
     if (!entity.grounded) return null;
+    const halfWidth = entity === player ? 14 : 12;
     return platforms.find(platform => (
       Math.abs(entity.y - platform.y) < 3
-      && entity.x >= platform.x - 14
-      && entity.x <= platform.x + platform.w + 14
+      && entity.x + halfWidth > platform.x
+      && entity.x - halfWidth < platform.x + platform.w
     ));
   }
 
   function moveMouse(mouse, dt) {
     const previousY = mouse.y;
+    const previousX = mouse.x;
     if (!mouse.grounded) mouse.vy += MOUSE_GRAVITY * dt;
     mouse.x += mouse.vx * dt;
     mouse.y += mouse.vy * dt;
@@ -849,6 +861,7 @@
     } else if (mouse.y < GROUND_Y) {
       mouse.grounded = false;
     }
+    if (mouse.grounded && mouse.state === "run") mouse.strideDistance += Math.abs(mouse.x - previousX);
   }
 
   function fireSorcererProjectile(sorcerer) {
@@ -1049,7 +1062,7 @@
     } else if (player.state === "air") {
       row = 2; frame = player.vy < -180 ? 0 : player.vy < 100 ? 1 : 2;
     } else if (player.state === "run") {
-      row = 1; frame = Math.floor(worldTime * 9) % 4;
+      row = 1; frame = Math.floor(player.strideDistance / 16) % 4;
     }
     drawDetailedFrame("catDetailed", row, frame, player);
     // Keep the established beam reach/FX and damage timings, independent of art.
@@ -1064,7 +1077,7 @@
   function drawMouse(mouse) {
     if (mouse.type === "zombie") {
       let row = 0, frame = Math.floor(worldTime * 3) % 4;
-      if (mouse.state === "run") row = 1;
+      if (mouse.state === "run") { row = 1; frame = mouse.grounded ? Math.floor(mouse.strideDistance / 10) % 4 : 1; }
       if (mouse.state === "attack") {
         row = 2;
         frame = mouse.stateTime < 0.4 ? 0 : mouse.stateTime < 0.8 ? 1 : mouse.stateTime < 0.95 ? 2 : 3;
@@ -1083,7 +1096,7 @@
     } else if (mouse.state === "attack") {
       row = 2; frame = mouse.stateTime < 0.14 ? 0 : mouse.stateTime < 0.27 ? 1 : mouse.stateTime < 0.46 ? 2 : 3;
     } else if (mouse.state === "run") {
-      row = 1; frame = Math.floor((worldTime + mouse.animOffset) * 9) % 4;
+      row = 1; frame = mouse.grounded ? Math.floor(mouse.strideDistance / 8) % 4 : 1;
     }
     drawDetailedFrame("mouseDetailed", row, frame, mouse);
   }
@@ -1117,29 +1130,8 @@
     ctx.restore();
   }
 
-  // The source sheet has uneven row spacing: a regular 4x4 cut includes
-  // transparent padding below the walking feet (and part of the next sword).
-  // Source baselines anchor visible feet to the same y used by collision physics.
-  const zombieRows = [
-    { y: 0, h: 310, feet: [296, 295, 295, 296], edges: [0, 310, 610, 914, 1246] },
-    { y: 310, h: 300, feet: [279, 279, 279, 279], edges: [0, 310, 634, 928, 1246] },
-    { y: 610, h: 340, feet: [328, 328, 329, 330] },
-    { y: 950, h: 312, feet: [272, 270, 284, 286] }
-  ];
-
   function drawZombieFrame(mouse, row, frame) {
-    const source = zombieRows[row];
-    const fw = images.zombie.width / 4;
-    const sx = source.edges ? source.edges[frame] : frame * fw;
-    const sw = source.edges ? source.edges[frame + 1] - sx : fw;
-    const scaleY = 104 / (images.zombie.height / 4);
-    ctx.save();
-    ctx.translate(Math.round(mouse.x), Math.round(mouse.y));
-    if (mouse.facing < 0) ctx.scale(-1, 1);
-    ctx.drawImage(images.zombie, sx, source.y, sw, source.h,
-      -56 + (sx - frame * fw) * 112 / fw, -source.feet[frame] * scaleY,
-      sw * 112 / fw, source.h * scaleY);
-    ctx.restore();
+    drawDetailedFrame("zombieDetailed", row, frame, mouse);
   }
 
   function drawSorcerer(sorcerer) {

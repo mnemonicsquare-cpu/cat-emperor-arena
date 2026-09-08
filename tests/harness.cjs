@@ -42,7 +42,7 @@ module.exports = function harness() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/atlas.js'),'utf8'),sandbox);
   vm.runInNewContext(source.replace('  loadAssets();\n  requestAnimationFrame(loop);', `
     globalThis.game = { createMouseSpawns, createMouse, createSorcerer, platforms, player, mice, sorcerers,
-      updateMouse, moveMouse, drawZombieFrame, zombieRows, images, drawArena, resetGame, update, draw,
+      updateMouse, moveMouse, drawZombieFrame, images, drawArena, resetGame, update, draw,
       damageMouse, damageSorcerer, updateSorcerer, chooseTeleportTarget, validTeleportTarget,
       projectileHitsTerrain, updateProjectiles, projectiles, drawProjectiles, drawSorcerer, drawPlayer,
       drawDetailedFrame, drawTeleportMist, assetPaths,

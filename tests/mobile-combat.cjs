@@ -92,7 +92,7 @@ g.damageSorcerer(wizard,1);assert.equal(wizard.state,'teleport');
 g.setCamera(1900,0);g.updateSorcerer(wizard,0.6);
 assert.equal(wizard.x,180);assert.equal(wizard.teleportTarget,null);
 
-// All 52 detailed poses keep a fixed scale and put the measured feet on y.
+// All 68 detailed poses keep a fixed scale and put the measured feet on y.
 for (const [name,atlas] of Object.entries(sandbox.window.ArenaAtlas)) {
   g.images[name]={};
   for(let row=0;row<atlas.rows.length;row++) for(let frame=0;frame<4;frame++) {

@@ -35,15 +35,14 @@ assert.equal(guard.alerted, true);
 assert.ok(guard.y > platform.y);
 
 // Render baselines must map exactly to the physics position in both directions.
-g.images.zombie = { width: 1246, height: 1262 };
+g.images.zombieDetailed = {};
 for (const facing of [-1, 1]) for (const y of [150, 550, g.GROUND_Y]) {
   for (let row = 0; row < 4; row++) for (let frame = 0; frame < 4; frame++) {
     calls.length = 0;
     g.drawZombieFrame({ x: 400, y, facing }, row, frame);
     const call = calls.find(c => c[0] === 'drawImage');
     const scaleY = call[9] / call[5];
-    assert.ok(Math.abs(call[7] + g.zombieRows[row].feet[frame] * scaleY) < 1e-9);
-    assert.ok(call[3] + call[5] <= g.images.zombie.height);
+    assert.ok(Math.abs(call[7] + sandbox.window.ArenaAtlas.zombieDetailed.rows[row][frame][5] * scaleY) < 1e-9);
     assert.ok(calls.some(c => c[0] === 'translate' && c[2] === y));
   }
 }
