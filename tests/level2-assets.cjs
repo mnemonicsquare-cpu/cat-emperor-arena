@@ -12,7 +12,7 @@ async function alphaAt(image, x, y) {
 }
 
 (async () => {
-  const weapon = await loadImage(path.join(root, "weapon.webp"));
+  const weapon = await loadImage(path.join(root, "weapon-v2.png"));
   const enemies = await loadImage(path.join(root, "enemies.webp"));
   const props = await loadImage(path.join(root, "props.webp"));
   const textures = await loadImage(path.join(root, "textures.webp"));
@@ -20,6 +20,8 @@ async function alphaAt(image, x, y) {
   assert.deepEqual([enemies.width, enemies.height], [1280, 768]);
   assert.deepEqual([props.width, props.height], [1024, 256]);
   assert.deepEqual([textures.width, textures.height], [256, 128]);
+  assert.equal(await alphaAt(weapon, 700, 450), 0, "rear arm is removed from the weapon sprite");
+  assert.ok(await alphaAt(weapon, 430, 430) > 0, "the gripping paw remains visible");
   for (const image of [weapon, enemies, props]) {
     assert.equal(await alphaAt(image, 0, 0), 0, "transparent top-left gutter");
     assert.equal(await alphaAt(image, image.width - 1, 0), 0, "transparent top-right gutter");

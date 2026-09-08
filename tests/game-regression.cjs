@@ -65,4 +65,12 @@ g.drawArena();
 const backgrounds = calls.filter(c => c[0] === 'drawImage' && c[1] === g.images.background);
 assert.equal(backgrounds.length, 1);
 assert.deepEqual(backgrounds[0].slice(2), [0, 0, 1920, 960]);
-console.log('PASS: all 16 platform choices, sustained patrols, pursuit, 96 zombie render poses, regeneration, continuous palace.');
+
+// Level 1 must ignore its own restart input while the FPS module is active.
+g.setMode('level2');
+g.player.x = 777;
+g.input.pressed.add('KeyR');
+g.update(1 / 60);
+assert.equal(g.player.x, 777);
+
+console.log('PASS: platforms, patrols, pursuit, render poses, regeneration, palace and isolated Level 2 restart.');

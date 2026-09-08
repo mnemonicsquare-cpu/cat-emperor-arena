@@ -30,7 +30,7 @@
     textures: "assets/fps/textures.webp",
     enemies: "assets/fps/enemies.webp",
     props: "assets/fps/props.webp",
-    weapon: "assets/fps/weapon.webp",
+    weapon: "assets/fps/weapon-v2.png",
     portrait: "assets/ui/cat_emperor_portrait.png"
   });
   const AUDIO_PATHS = Object.freeze({
@@ -83,16 +83,17 @@
   let muzzleFlash = 0;
   let damageFlash = 0;
   let cameraKick = 0;
-  let ejectedCase = null;
+  let shotTrace = 0;
+  const ejectedCases = [];
   const samples = Object.fromEntries(Object.entries(AUDIO_PATHS).map(([name, src]) => {
-    const audio = new Audio(src); audio.preload = "auto"; return [name, audio];
+    const audio = new Audio(src); audio.preload = "metadata"; return [name, audio];
   }));
   const levelMusicParts = Array.from({ length: 6 }, (_, index) =>
     `assets/audio/fps/iron-titan-parts/iron-titan-orbit.mp3.part-${String(index).padStart(2, "0")}`
   );
   const levelMusic = new Audio();
   levelMusic.loop = true;
-  levelMusic.preload = "auto";
+  levelMusic.preload = "metadata";
   levelMusic.volume = 0.26;
 
   const player = {
@@ -137,14 +138,16 @@
 
   function prepareLevelMusic() {
     if (levelMusicPromise) return levelMusicPromise;
-    levelMusicPromise = Promise.all(levelMusicParts.map(async path => {
-      const response = await fetch(path);
-      if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
-      return response.arrayBuffer();
-    })).then(parts => {
+    levelMusicPromise = (async () => {
+      const parts = [];
+      for (const path of levelMusicParts) {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(`Не удалось загрузить ${path}`);
+        parts.push(await response.arrayBuffer());
+      }
       levelMusic.src = URL.createObjectURL(new Blob(parts, { type: "audio/mpeg" }));
       levelMusic.load();
-    }).catch(error => {
+    })().catch(error => {
       levelMusicPromise = null;
       throw error;
     });
@@ -188,7 +191,7 @@
     });
     score = 0; kills = 0; elapsed = 0;
     recoil = 0; muzzleFlash = 0; damageFlash = 0; cameraKick = 0;
-    ejectedCase = null; fireHeld = false; message = ""; messageTime = 0;
+    shotTrace = 0; ejectedCases.length = 0; fireHeld = false; message = ""; messageTime = 0;
     nearbyInteraction = null;
     levelMusic.currentTime = 0;
   }
@@ -207,6 +210,7 @@
     fpsAction.hidden = true;
     window.dispatchEvent(new CustomEvent("cat-emperor:level2-active", { detail: { active: true } }));
     syncTouchMode();
+    setSceneResolution(isTouchMode() ? 256 : 320, isTouchMode() ? 144 : 180);
     resetLevel();
     try {
       await loadAssets();
@@ -397,12 +401,14 @@
     player.invuln = Math.max(0, player.invuln - dt);
     recoil = Math.max(0, recoil - dt * 7.4);
     muzzleFlash = Math.max(0, muzzleFlash - dt);
+    shotTrace = Math.max(0, shotTrace - dt);
     damageFlash = Math.max(0, damageFlash - dt * 2.6);
     cameraKick += (0 - cameraKick) * Math.min(1, dt * 13);
 
     updateDoors(dt);
     updatePlayer(dt);
     updateEnemies(dt);
+    separatePlayerAndEnemies();
     updateProjectiles(dt);
     updateParticles(dt);
     updateInteraction();
@@ -410,7 +416,7 @@
 
     averageFrame = averageFrame * 0.96 + dt * 0.04;
     if (averageFrame > 1 / 43) slowFrames += 1; else slowFrames = Math.max(0, slowFrames - 2);
-    if (slowFrames > 150 && sceneW > 256) { setSceneResolution(256, 144); slowFrames = 0; }
+    if (slowFrames > 90 && sceneW > 256) { setSceneResolution(256, 144); slowFrames = 0; }
   }
 
   function updateDoors(dt) {
@@ -442,7 +448,7 @@
       if (enemy.state === "dead") continue;
       const ex = player.x - enemy.x, ey = player.y - enemy.y, min = player.radius + enemy.radius;
       const d = Math.hypot(ex, ey);
-      if (d < min && d > 0.001) {
+      if (d < min) {
         player.x = previousX; player.y = previousY; break;
       }
     }
@@ -485,8 +491,9 @@
     }
     player.magazine -= 1;
     player.fireCooldown = 0.19;
-    recoil = 1; muzzleFlash = 0.065; cameraKick = -2.5;
-    ejectedCase = { time: 0, x: W * 0.72, y: H * 0.73, vx: 78, vy: -84 };
+    recoil = 1; muzzleFlash = 0.075; shotTrace = 0.06; cameraKick = -1.4;
+    ejectedCases.push({ time: 0, x: W * 0.69, y: H * 0.70, vx: 72 + Math.random() * 32, vy: -92 - Math.random() * 28, spin: 7 + Math.random() * 5 });
+    if (ejectedCases.length > 7) ejectedCases.shift();
     sound("shot");
     const wall = core.castRay(world, player.x, player.y, Math.cos(player.angle), Math.sin(player.angle), 24);
     let victim = null, victimDistance = Infinity;
@@ -621,6 +628,23 @@
     }
   }
 
+  function separatePlayerAndEnemies() {
+    for (const enemy of enemies) {
+      if (enemy.state === "dead" || enemy.state === "teleport") continue;
+      let dx = enemy.x - player.x, dy = enemy.y - player.y;
+      let distance = Math.hypot(dx, dy);
+      const minimum = player.radius + enemy.radius + 0.08;
+      if (distance >= minimum) continue;
+      if (distance < 0.001) {
+        dx = -Math.cos(player.angle); dy = -Math.sin(player.angle); distance = 1;
+      }
+      const push = minimum - distance + 0.012;
+      const nx = dx / distance, ny = dy / distance;
+      const moved = core.moveCircle(world, enemy, nx * push, ny * push, enemy.radius);
+      if (moved < push * 0.5) core.moveCircle(world, player, -nx * (push - moved), -ny * (push - moved), player.radius);
+    }
+  }
+
   function startEnemyAttack(enemy) {
     enemy.state = "attack"; enemy.stateTime = 0; enemy.attackDone = false;
     if (enemy.type === "sorcerer") sound("magic"); else sound("claw");
@@ -689,9 +713,10 @@
       const p = particles[i]; p.life -= dt; p.x += p.vx*dt; p.y += p.vy*dt;
       if (p.life <= 0) particles.splice(i,1);
     }
-    if (ejectedCase) {
-      ejectedCase.time += dt; ejectedCase.x += ejectedCase.vx*dt; ejectedCase.y += ejectedCase.vy*dt; ejectedCase.vy += 260*dt;
-      if (ejectedCase.time > .65) ejectedCase = null;
+    for (let i = ejectedCases.length - 1; i >= 0; i -= 1) {
+      const shell = ejectedCases[i];
+      shell.time += dt; shell.x += shell.vx*dt; shell.y += shell.vy*dt; shell.vy += 260*dt;
+      if (shell.time > .82) ejectedCases.splice(i, 1);
     }
   }
 
@@ -748,15 +773,26 @@
     if (messageTime > 0) drawMessage();
   }
 
-  function texel(index, x, y) {
-    const data=texturePixels[index]||texturePixels[0],i=((y&63)*64+(x&63))*4;
-    return [data[i],data[i+1],data[i+2]];
-  }
-
   function writePixel(data, x, y, color, shade=1) {
     if (x<0||y<0||x>=sceneW||y>=sceneH)return;
     const i=(y*sceneW+x)*4;
     data[i]=color[0]*shade;data[i+1]=color[1]*shade;data[i+2]=color[2]*shade;data[i+3]=255;
+  }
+
+  function writeTexturePixel(data, x, y, texture, textureX, textureY, shade) {
+    const source=(texturePixels[texture]||texturePixels[0]),sourceIndex=(((textureY&63)*64)+(textureX&63))*4,targetIndex=(y*sceneW+x)*4;
+    data[targetIndex]=source[sourceIndex]*shade;data[targetIndex+1]=source[sourceIndex+1]*shade;data[targetIndex+2]=source[sourceIndex+2]*shade;data[targetIndex+3]=255;
+  }
+
+  function drawWallColumn(data, x, hit, rayX, rayY, horizon) {
+    const fullHeight=Math.min(sceneH*4,Math.abs(sceneH/hit.distance));
+    let start=horizon-fullHeight/2,end=horizon+fullHeight/2,shift=0;
+    if(hit.door){shift=-hit.door.open*fullHeight;start+=shift;end+=shift;}
+    const texture=hit.tile===core.TILE.STONE?1:hit.tile===core.TILE.PORTRAIT?3:hit.tile===core.TILE.DOOR?2:hit.tile===core.TILE.BANNER?7:0;
+    let textureX=Math.floor(hit.wallX*64);if((hit.side===0&&rayX>0)||(hit.side===1&&rayY<0))textureX=63-textureX;
+    const shade=Math.max(.22,Math.min(1,1-hit.distance/18))*(hit.side?.76:1);
+    const y0=Math.max(0,Math.floor(start)),y1=Math.min(sceneH-1,Math.ceil(end));
+    for(let y=y0;y<=y1;y+=1){const originalY=y-shift,textureY=Math.floor((originalY-(horizon-fullHeight/2))*64/fullHeight);writeTexturePixel(data,x,y,texture,textureX,textureY,shade);}
   }
 
   function renderWorld() {
@@ -774,20 +810,20 @@
         const tx=Math.floor(wx*64)&63,ty=Math.floor(wy*64)&63,ix=Math.floor(wx),iy=Math.floor(wy);
         const texture=lower?(world.floor[iy]?.[ix]===4?4:5):6;
         const shade=Math.max(.2,Math.min(.92,1-distance/22))*(lower?1:.72);
-        writePixel(data,x,y,texel(texture,tx,ty),shade);wx+=stepX;wy+=stepY;
+        writeTexturePixel(data,x,y,texture,tx,ty,shade);wx+=stepX;wy+=stepY;
       }
     }
     for(let x=0;x<sceneW;x+=1){
       const camera=2*x/sceneW-1,rayX=dirX+planeX*camera,rayY=dirY+planeY*camera;
-      const hit=core.castRay(world,player.x,player.y,rayX,rayY,30);zBuffer[x]=hit.distance;
-      const fullHeight=Math.min(sceneH*4,Math.abs(sceneH/hit.distance));
-      let start=horizon-fullHeight/2,end=horizon+fullHeight/2,shift=0;
-      if(hit.door){shift=-hit.door.open*fullHeight;start+=shift;end+=shift;}
-      const texture=hit.tile===core.TILE.STONE?1:hit.tile===core.TILE.PORTRAIT?3:hit.tile===core.TILE.DOOR?2:hit.tile===core.TILE.BANNER?7:0;
-      let textureX=Math.floor(hit.wallX*64);if((hit.side===0&&rayX>0)||(hit.side===1&&rayY<0))textureX=63-textureX;
-      const shade=Math.max(.22,Math.min(1,1-hit.distance/18))*(hit.side?.76:1);
-      const y0=Math.max(0,Math.floor(start)),y1=Math.min(sceneH-1,Math.ceil(end));
-      for(let y=y0;y<=y1;y+=1){const originalY=y-shift;const textureY=Math.floor((originalY-(horizon-fullHeight/2))*64/fullHeight);writePixel(data,x,y,texel(texture,textureX,textureY),shade);}
+      const hit=core.castRay(world,player.x,player.y,rayX,rayY,30);
+      if(hit.door&&hit.door.open>.01){
+        const advance=hit.distance+.015;
+        const rear=core.castRay(world,player.x+rayX*advance,player.y+rayY*advance,rayX,rayY,30-advance);
+        rear.distance+=advance;
+        drawWallColumn(data,x,rear,rayX,rayY,horizon);
+      }
+      zBuffer[x]=hit.distance;
+      drawWallColumn(data,x,hit,rayX,rayY,horizon);
     }
     sceneCtx.putImageData(sceneImage,0,0);
   }
@@ -818,6 +854,7 @@
     let image,cols,rows,frame,row,scale,alpha=1;
     if(sprite.kind==="enemy"){
       image=images.enemies;cols=5;rows=3;row=TYPE_ROW[item.type];frame=STATE_FRAME[item.state]??0;scale=item.spriteScale;
+      if(item.type==="sorcerer"&&item.state==="attack")frame=1;
       if(item.state==="teleport")alpha=item.stateTime<.48?Math.max(0,1-item.stateTime/.48):Math.min(1,(item.stateTime-.48)/.52);
       if(item.flash>0&&Math.floor(item.flash*40)%2===0)alpha*=.45;
     }else{
@@ -828,11 +865,20 @@
     const sourceW=image.width/cols,sourceH=image.height/rows,spriteHeight=Math.abs(sceneH/ty)*scale,spriteWidth=spriteHeight*(sourceW/sourceH);
     const bottom=horizon+sceneH/(2*ty),startY=bottom-spriteHeight,startX=screenX-spriteWidth/2,endX=startX+spriteWidth;
     sceneCtx.globalAlpha=alpha;
-    for(let stripe=Math.max(0,Math.floor(startX));stripe<Math.min(sceneW,Math.ceil(endX));stripe+=1){
-      if(ty>=zBuffer[stripe])continue;
-      const sourceX=frame*sourceW+Math.floor((stripe-startX)/spriteWidth*sourceW);
-      sceneCtx.drawImage(image,sourceX,row*sourceH,1,sourceH,stripe,startY,1,spriteHeight);
+    let runStart=-1;
+    const drawRun=(from,to)=>{
+      if(to<=from)return;
+      const sourceX=frame*sourceW+(from-startX)/spriteWidth*sourceW;
+      const sourceWidth=(to-from)/spriteWidth*sourceW;
+      sceneCtx.drawImage(image,sourceX,row*sourceH,sourceWidth,sourceH,from,startY,to-from,spriteHeight);
+    };
+    const firstStripe=Math.max(0,Math.ceil(startX)),lastStripe=Math.min(sceneW,Math.floor(endX));
+    for(let stripe=firstStripe;stripe<lastStripe;stripe+=1){
+      const visible=ty<zBuffer[stripe];
+      if(visible&&runStart<0)runStart=stripe;
+      else if(!visible&&runStart>=0){drawRun(runStart,stripe);runStart=-1;}
     }
+    if(runStart>=0)drawRun(runStart,lastStripe);
     sceneCtx.globalAlpha=1;
     if(sprite.kind==="enemy"&&item.state==="teleport")drawProjectedMist(screenX,bottom,spriteHeight,item.stateTime);
   }
@@ -847,13 +893,19 @@
     if(!images.weapon)return;
     const bobX=Math.sin(player.bob*.5)*Math.min(3,player.moving),bobY=Math.abs(Math.cos(player.bob))*Math.min(2.4,player.moving*.7);
     const width=354,height=images.weapon.height/images.weapon.width*width;
-    const x=W/2-width/2+40+bobX-recoil*4,y=H-height+19+bobY+recoil*15;
+    const x=W/2-width/2+40+bobX+recoil*4,y=H-height+16+bobY-recoil*10;
+    const muzzleX=x+width*(304/768),muzzleY=y+height*(105/512);
     ctx.drawImage(images.weapon,x,y,width,height);
     if(muzzleFlash>0){
-      const mx=W/2,my=H/2;
-      ctx.fillStyle="#fff6bd";ctx.fillRect(mx-4,my-8,8,17);ctx.fillStyle="#ffb229";ctx.fillRect(mx-10,my-3,20,6);ctx.fillStyle="#e75b16";ctx.fillRect(mx-3,my-13,6,26);
+      const strength=Math.min(1,muzzleFlash/.075),gradient=ctx.createRadialGradient(muzzleX,muzzleY,0,muzzleX,muzzleY,52);
+      ctx.save();ctx.globalCompositeOperation="screen";gradient.addColorStop(0,`rgba(255,246,185,${.9*strength})`);gradient.addColorStop(.25,`rgba(255,151,37,${.38*strength})`);gradient.addColorStop(1,"rgba(255,92,14,0)");ctx.fillStyle=gradient;ctx.fillRect(muzzleX-54,muzzleY-54,108,108);ctx.restore();
+      ctx.fillStyle="#fff6bd";ctx.fillRect(muzzleX-4,muzzleY-8,8,17);ctx.fillStyle="#ffb229";ctx.fillRect(muzzleX-11,muzzleY-3,22,6);ctx.fillStyle="#e75b16";ctx.fillRect(muzzleX-3,muzzleY-15,6,30);
     }
-    if(ejectedCase){ctx.save();ctx.translate(ejectedCase.x,ejectedCase.y);ctx.rotate(ejectedCase.time*9);ctx.fillStyle="#d69b31";ctx.fillRect(-3,-1,6,2);ctx.restore();}
+    if(shotTrace>0){
+      const dx=W/2-muzzleX,dy=H/2-muzzleY,length=Math.hypot(dx,dy)||1,nx=dx/length,ny=dy/length;
+      ctx.save();ctx.globalAlpha=Math.min(1,shotTrace/.06);ctx.strokeStyle="#fff2a3";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(muzzleX,muzzleY);ctx.lineTo(W/2+nx*13,H/2+ny*13);ctx.stroke();ctx.restore();
+    }
+    for(const shell of ejectedCases){ctx.save();ctx.translate(shell.x,shell.y);ctx.rotate(shell.time*shell.spin);ctx.fillStyle="#4b2b0e";ctx.fillRect(-6,-3,12,6);ctx.fillStyle="#e1a33a";ctx.fillRect(-5,-2,10,4);ctx.fillStyle="#ffe089";ctx.fillRect(-4,-2,6,1);ctx.restore();}
   }
 
   function drawHud() {

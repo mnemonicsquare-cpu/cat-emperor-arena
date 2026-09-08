@@ -19,6 +19,10 @@ const fpsVictory = fps.slice(fps.indexOf("function showVictory"), fps.indexOf("f
 assert.match(fpsVictory, /CatEmperorApp\?\.playVictoryVideo\(\)/, "level two victory must use the shared cinematic");
 assert.doesNotMatch(fps, /movementY/, "vertical mouse look must remain disabled");
 assert.match(fps, /function drawCrosshair\(\)\{\s*const x=W\/2,y=H\/2;/, "crosshair must remain fixed at screen centre");
+assert.match(fps, /y=H-height\+16\+bobY-recoil\*10/, "weapon recoil must move upward");
+assert.match(fps, /setSceneResolution\(isTouchMode\(\) \? 256 : 320/, "touch devices must start at the lower render resolution");
+assert.doesNotMatch(fps, /function texel\(/, "the hot renderer must not allocate a colour array per pixel");
+assert.match(fps, /drawWallColumn\(data,x,rear/, "opening doors must render the real room behind them");
 
 const audioRoot = path.join(root, "assets/audio/fps");
 for (const name of [

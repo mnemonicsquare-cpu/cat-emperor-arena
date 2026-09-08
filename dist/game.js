@@ -1030,6 +1030,7 @@
   }
 
   function update(dt) {
+    if (mode === "level2") return;
     if (wasPressed("KeyR") && mode !== "loading") resetGame();
     if (mode !== "playing") return;
     worldTime += dt;
