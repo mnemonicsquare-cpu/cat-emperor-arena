@@ -106,8 +106,10 @@
   }
 
   function canStand(world, x, y, radius = 0.2) {
-    const samples = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
-    return samples.every(([sx, sy]) => !pointSolid(world, x + sx * radius, y + sy * radius));
+    return !pointSolid(world,x-radius,y-radius) && !pointSolid(world,x,y-radius)
+      && !pointSolid(world,x+radius,y-radius) && !pointSolid(world,x-radius,y)
+      && !pointSolid(world,x+radius,y) && !pointSolid(world,x-radius,y+radius)
+      && !pointSolid(world,x,y+radius) && !pointSolid(world,x+radius,y+radius);
   }
 
   function moveCircle(world, entity, dx, dy, radius = entity.radius || 0.2) {
@@ -155,14 +157,18 @@
     return !world.doors.get(key(x, y))?.locked;
   }
 
+  // Searches are synchronous; scratch buffers are reused, returned paths are independent.
+  const pathQueue = new Int32Array(MAP_W * MAP_H);
+  const pathPrevious = new Int32Array(MAP_W * MAP_H);
+  const pathDirections = [[1,0],[-1,0],[0,1],[0,-1]];
   function findPath(world, fromX, fromY, toX, toY, maxNodes = 420) {
     const sx = Math.floor(fromX), sy = Math.floor(fromY), gx = Math.floor(toX), gy = Math.floor(toY);
     if (!inBounds(sx, sy) || !inBounds(gx, gy)) return [];
     const start = sy * MAP_W + sx, goal = gy * MAP_W + gx;
-    const queue = new Int32Array(MAP_W * MAP_H), previous = new Int32Array(MAP_W * MAP_H);
+    const queue = pathQueue, previous = pathPrevious;
     previous.fill(-2); previous[start] = -1; queue[0] = start;
     let head = 0, tail = 1, visited = 0;
-    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    const dirs = pathDirections;
     while (head < tail && visited++ < maxNodes) {
       const current = queue[head++];
       if (current === goal) break;

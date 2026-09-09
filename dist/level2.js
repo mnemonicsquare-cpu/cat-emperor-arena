@@ -54,6 +54,9 @@
   const particles = [];
   const projectiles = [];
   const zBuffer = [];
+  const spritePool = [];
+  const visibleSprites = [];
+  const sortSprites = (a,b) => b.d-a.d;
   const touchMove = { x: 0, y: 0, pointer: null };
   const lookTouch = { pointer: null, x: 0, y: 0 };
   let world = null;
@@ -732,10 +735,11 @@
     const label = nearbyInteraction?.type === "door" ? (nearbyInteraction.value.locked ? "СЕВЕРНАЯ ДВЕРЬ ЗАПЕЧАТАНА" : "E · ОТКРЫТЬ ДВЕРЬ")
       : nearbyInteraction?.type === "lever" ? "E · СНЯТЬ ИМПЕРСКУЮ ПЕЧАТЬ"
       : nearbyInteraction?.type === "exit" ? (finalRemaining() ? "ВЫХОД ЗАКРЫТ: ТРОННЫЙ ЗАЛ НЕ ОЧИЩЕН" : "E · ПОКИНУТЬ УРОВЕНЬ") : "";
-    fpsPrompt.textContent = label;
-    fpsPrompt.hidden = !label;
-    fpsUse.hidden = !isTouchMode() || !nearbyInteraction;
-    fpsUse.disabled = false;
+    if(fpsPrompt.textContent!==label)fpsPrompt.textContent=label;
+    if(fpsPrompt.hidden!==!label)fpsPrompt.hidden=!label;
+    const hideUse=!isTouchMode()||!nearbyInteraction;
+    if(fpsUse.hidden!==hideUse)fpsUse.hidden=hideUse;
+    if(fpsUse.disabled)fpsUse.disabled=false;
   }
 
   function interact() {
@@ -799,18 +803,23 @@
     const data=sceneImage.data, dirX=Math.cos(player.angle),dirY=Math.sin(player.angle),planeSize=Math.tan(FOV/2);
     const planeX=-dirY*planeSize,planeY=dirX*planeSize;
     const bob=Math.sin(player.bob)*Math.min(1.3,player.moving*.38),horizon=Math.round(sceneH/2+bob+cameraKick*.5);
-    data.fill(0);
     const leftX=dirX-planeX,leftY=dirY-planeY,rightX=dirX+planeX,rightY=dirY+planeY;
     for(let y=0;y<sceneH;y+=1){
       if(y===horizon){for(let x=0;x<sceneW;x++)writePixel(data,x,y,[50,35,21],.8);continue;}
       const lower=y>horizon,dy=Math.abs(y-horizon),distance=sceneH/(2*Math.max(1,dy));
       let wx=player.x+distance*leftX,wy=player.y+distance*leftY;
       const stepX=distance*(rightX-leftX)/sceneW,stepY=distance*(rightY-leftY)/sceneW;
+      const shade=Math.max(.2,Math.min(.92,1-distance/22))*(lower?1:.72);
+      let targetIndex=y*sceneW*4;
       for(let x=0;x<sceneW;x+=1){
         const tx=Math.floor(wx*64)&63,ty=Math.floor(wy*64)&63,ix=Math.floor(wx),iy=Math.floor(wy);
         const texture=lower?(world.floor[iy]?.[ix]===4?4:5):6;
-        const shade=Math.max(.2,Math.min(.92,1-distance/22))*(lower?1:.72);
-        writeTexturePixel(data,x,y,texture,tx,ty,shade);wx+=stepX;wy+=stepY;
+        const source=texturePixels[texture],sourceIndex=(ty*64+tx)*4;
+        data[targetIndex++]=source[sourceIndex]*shade;
+        data[targetIndex++]=source[sourceIndex+1]*shade;
+        data[targetIndex++]=source[sourceIndex+2]*shade;
+        data[targetIndex++]=255;
+        wx+=stepX;wy+=stepY;
       }
     }
     for(let x=0;x<sceneW;x+=1){
@@ -830,13 +839,21 @@
 
   function renderSprites() {
     const dirX=Math.cos(player.angle),dirY=Math.sin(player.angle),planeSize=Math.tan(FOV/2),planeX=-dirY*planeSize,planeY=dirX*planeSize;
-    const sprites=[];
-    for(const enemy of enemies)sprites.push({kind:"enemy",value:enemy,d:(enemy.x-player.x)**2+(enemy.y-player.y)**2});
-    for(const prop of world.props)if(prop.active)sprites.push({kind:"prop",value:prop,d:(prop.x-player.x)**2+(prop.y-player.y)**2});
-    for(const projectile of projectiles)sprites.push({kind:"projectile",value:projectile,d:(projectile.x-player.x)**2+(projectile.y-player.y)**2});
-    for(const particle of particles)sprites.push({kind:"particle",value:particle,d:(particle.x-player.x)**2+(particle.y-player.y)**2});
-    sprites.sort((a,b)=>b.d-a.d);
+    const sprites=visibleSprites;sprites.length=0;
+    for(const enemy of enemies)queueSprite("enemy",enemy);
+    for(const prop of world.props)if(prop.active)queueSprite("prop",prop);
+    for(const projectile of projectiles)queueSprite("projectile",projectile);
+    for(const particle of particles)queueSprite("particle",particle);
+    sprites.sort(sortSprites);
     for(const sprite of sprites)projectSprite(sprite,dirX,dirY,planeX,planeY);
+  }
+
+  function queueSprite(kind,value){
+    const index=visibleSprites.length;
+    const entry=spritePool[index]||(spritePool[index]={kind:"",value:null,d:0});
+    entry.kind=kind;entry.value=value;
+    entry.d=(value.x-player.x)**2+(value.y-player.y)**2;
+    visibleSprites.push(entry);
   }
 
   function projectSprite(sprite,dirX,dirY,planeX,planeY) {
